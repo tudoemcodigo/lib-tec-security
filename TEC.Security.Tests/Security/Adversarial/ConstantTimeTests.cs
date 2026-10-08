@@ -15,7 +15,7 @@ namespace TEC.Security.Tests.Security.Adversarial;
 /// entre duas classes de entrada intercaladas aleatoriamente) são pesados e ruidosos: rodam sob demanda, na categoria
 /// <see cref="TestCategories.SecurityHeavy"/> (veja docs/testes.md).
 /// </remarks>
-[NotInParallel(DosResistanceTests.TimingKey)]
+[NotInParallel]
 public class ConstantTimeTests
 {
     // Limite do |t| de Welch: acima disso há diferença de tempo detectável entre as classes (dudect usa 4,5 a 10)
