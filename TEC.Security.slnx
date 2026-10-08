@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="TEC.Security.AspNetCore/TEC.Security.AspNetCore.csproj" />
+  <Project Path="TEC.Security.Benchmarks/TEC.Security.Benchmarks.csproj" />
+  <Project Path="TEC.Security.EntraId/TEC.Security.EntraId.csproj" />
+  <Project Path="TEC.Security.LoadTests/TEC.Security.LoadTests.csproj" />
+  <Project Path="TEC.Security.Testing/TEC.Security.Testing.csproj" />
+  <Project Path="TEC.Security.Tests/TEC.Security.Tests.csproj" />
+  <Project Path="TEC.Security/TEC.Security.csproj" />
+</Solution>

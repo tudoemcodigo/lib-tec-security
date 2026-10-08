@@ -1,0 +1,92 @@
+name: Performance
+
+# Suítes pesadas e de carga: só sob demanda (Actions -> Performance -> Run workflow). Não rodam no PR nem na publicação.
+#   rapida     -> TEC.Security.LoadTests [Carga-CI]: carga curta com limites folgados (input suite = rapida ou todas)
+#   carga      -> TEC.Security.LoadTests [Carga-Pesada]: volume, soak, carga sustentada e inundação
+#   seguranca  -> TEC.Security.Tests [Seguranca-Pesada]: canais laterais de tempo
+#   benchmarks -> TEC.Security.Benchmarks, só no disparo manual
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Suítes de carga: pesadas (Carga-Pesada e Seguranca-Pesada), rapida (Carga-CI) ou todas"
+        type: choice
+        options: [pesadas, rapida, todas]
+        default: pesadas
+      soak_segundos:
+        description: "Duração do soak em processo (segundos)"
+        type: number
+        default: 600
+      api_segundos:
+        description: "Duração da carga sustentada na API protegida (segundos)"
+        type: number
+        default: 120
+      tenants:
+        description: "Tenants no teste de volume do cadastro"
+        type: number
+        default: 100000
+      identidades:
+        description: "Identidades distintas no teste de volume do cache de permissões"
+        type: number
+        default: 200000
+      benchmarks:
+        description: "Rodar também os benchmarks"
+        type: boolean
+        default: false
+      benchmark_filtro:
+        description: "Filtro do BenchmarkDotNet (* = todos)"
+        type: string
+        default: "*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rapida:
+    if: inputs.suite != 'pesadas'
+    uses: tudoemcodigo/tec-workflows/.github/workflows/dotnet-test.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    with:
+      name: carga rápida
+      tests: TEC.Security.LoadTests /*/*/*/*[Category=Carga-CI]
+      private-feed: true
+      artifact: carga
+
+  pesados:
+    if: inputs.suite != 'rapida'
+    uses: tudoemcodigo/tec-workflows/.github/workflows/dotnet-test.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    with:
+      name: suítes pesadas
+      tests: |
+        TEC.Security.LoadTests /*/*/*/*[Category=Carga-Pesada]
+        TEC.Security.Tests /*/*/*/*[Category=Seguranca-Pesada]
+      private-feed: true
+      env: |
+        TEC_CARGA_SOAK_SEGUNDOS=${{ inputs.soak_segundos || 600 }}
+        TEC_CARGA_API_SEGUNDOS=${{ inputs.api_segundos || 120 }}
+        TEC_CARGA_TENANTS=${{ inputs.tenants || 100000 }}
+        TEC_CARGA_IDENTIDADES=${{ inputs.identidades || 200000 }}
+      artifact: pesados
+      timeout-minutes: 120
+
+  benchmarks:
+    if: inputs.benchmarks
+    uses: tudoemcodigo/tec-workflows/.github/workflows/dotnet-benchmark.yml@v1
+    permissions:
+      contents: read
+      packages: read
+    with:
+      project: TEC.Security.Benchmarks
+      private-feed: true
+      filter: ${{ inputs.benchmark_filtro }}

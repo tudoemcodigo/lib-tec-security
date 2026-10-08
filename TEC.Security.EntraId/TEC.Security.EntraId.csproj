@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Configurações de build, segurança, AOT e metadados comuns: ..\Directory.Build.props -->
+
+  <PropertyGroup>
+    <RootNamespace>TEC.Security.EntraId</RootNamespace>
+    <Description>Login com Microsoft Entra ID em APIs e sites, com tenants liberados por configuração, chamadas entre serviços sem segredo na aplicação e credenciais guardadas no cofre, com a chave privada assinando dentro do cofre.</Description>
+    <PackageTags>security;entra-id;azure-ad;oidc;jwt;multi-tenant;on-behalf-of;zero-trust;tec</PackageTags>
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TEC.Security.AspNetCore\TEC.Security.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <!-- TEC.Vault: certificado/segredo da aplicação no cofre (pacote do feed interno, tec-interno) -->
+  <ItemGroup>
+    <TecReference Include="TEC.Vault" />
+  </ItemGroup>
+
+</Project>

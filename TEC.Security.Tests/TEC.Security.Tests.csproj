@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Mesmo id em todos os projetos de teste dos componentes TEC: um único "dotnet user-secrets set" vale para todos -->
+    <UserSecretsId>tudoemcodigo-tec-testes</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+    <PackageReference Include="TUnit" />
+    <!-- Testes de propriedade / fuzzing (Security/Fuzzing): só no projeto de testes, os pacotes não dependem dele -->
+    <PackageReference Include="FsCheck" />
+  </ItemGroup>
+
+  <!-- Versão por runtime (8.0.x no net8.0, 10.0.x no net10.0) definida no Directory.Packages.props -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <!--
+    Configuração dos testes de integração na máquina do desenvolvedor (ver Integration\TestSettings.cs): variáveis de
+    ambiente, user-secrets ou appsettings.Local.json (seção TecTestes; arquivo ignorado pelo git, copiado para a saída).
+  -->
+  <ItemGroup>
+    <None Include="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Local.json')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TEC.Security\TEC.Security.csproj" />
+    <ProjectReference Include="..\TEC.Security.AspNetCore\TEC.Security.AspNetCore.csproj" />
+    <ProjectReference Include="..\TEC.Security.EntraId\TEC.Security.EntraId.csproj" />
+    <ProjectReference Include="..\TEC.Security.Testing\TEC.Security.Testing.csproj" />
+  </ItemGroup>
+
+  <!-- TEC.Vault.AzureKeyVault: lê do cofre de testes o certificado da aplicação cliente; TEC.Vault.InMemory: fallback com o
+       cofre offline (segredo da aplicação cliente vindo do user-secrets). Pacotes do feed interno -->
+  <ItemGroup>
+    <TecReference Include="TEC.Vault.AzureKeyVault" />
+    <TecReference Include="TEC.Vault.InMemory" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Configurações de build, segurança, AOT e metadados comuns: ..\Directory.Build.props -->
+
+  <PropertyGroup>
+    <RootNamespace>TEC.Security.AspNetCore</RootNamespace>
+    <Description>Protege APIs e sites ASP.NET Core com vários provedores de login ao mesmo tempo: validação de token endurecida, autorização por permissão com um único atributo, tudo fechado por padrão e respostas 401/403 padronizadas.</Description>
+    <PackageTags>security;authentication;authorization;aspnetcore;jwt;oidc;api-key;zero-trust;tec</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- Versão por runtime (8.0.x no net8.0, 10.0.x no net10.0) definida no Directory.Packages.props -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TEC.Security\TEC.Security.csproj" />
+  </ItemGroup>
+
+</Project>
