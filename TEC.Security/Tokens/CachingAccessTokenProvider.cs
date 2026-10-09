@@ -7,6 +7,7 @@ using TEC.Security.Abstractions;
 using TEC.Security.Common;
 using TEC.Security.Diagnostics;
 using TEC.Security.Internal;
+using TEC.Security.Resilience;
 
 namespace TEC.Security.Tokens;
 
@@ -18,6 +19,8 @@ namespace TEC.Security.Tokens;
 /// <para>O token é renovado quando faltam menos de <see cref="RefreshBefore"/> (5 minutos) para expirar. Se a renovação falhar
 /// e o token atual ainda valer por mais de <see cref="MinimumRemainingLifetime"/>, ele continua sendo usado (log 3122): uma
 /// instabilidade passageira do provedor não derruba as chamadas entre serviços.</para>
+/// <para>Com um <see cref="SecurityCircuitBreaker"/>, falhas repetidas abrem o circuito: as renovações seguintes falham na hora
+/// (<see cref="SecurityCircuitOpenException"/> como causa) sem chamar o provedor, e a regra do token atual acima continua valendo.</para>
 /// <para>Falhas do provedor sem token utilizável são registradas (evento 3120) e lançadas como
 /// <see cref="SecurityTokenAcquisitionException"/>, sem detalhes de infraestrutura na mensagem; a exceção original fica em
 /// <see cref="Exception.InnerException"/>.</para>
@@ -37,19 +40,23 @@ public abstract class CachingAccessTokenProvider : IAccessTokenProvider, IDispos
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
     private readonly ILogger? _logger;
+    private readonly SecurityCircuitBreaker? _circuitBreaker;
     private volatile bool _disposed;
 
     /// <summary>Cria a base.</summary>
     /// <param name="providerName">Nome do provedor nas métricas e logs (ex.: <c>EntraId</c>).</param>
     /// <param name="time">Relógio (expiração dos tokens); padrão <see cref="TimeProvider.System"/>.</param>
     /// <param name="logger">Log (opcional; nunca recebe o token).</param>
+    /// <param name="circuitBreaker">Circuit breaker do provedor (opcional; compartilhado entre os conjuntos de escopos).</param>
     /// <exception cref="ArgumentException"><paramref name="providerName"/> vazio.</exception>
-    protected CachingAccessTokenProvider(string providerName, TimeProvider? time = null, ILogger? logger = null)
+    protected CachingAccessTokenProvider(string providerName, TimeProvider? time = null, ILogger? logger = null,
+        SecurityCircuitBreaker? circuitBreaker = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
         ProviderName = providerName;
         _time = time ?? TimeProvider.System;
         _logger = logger;
+        _circuitBreaker = circuitBreaker;
     }
 
     /// <summary>Nome do provedor nas métricas e logs (ex.: <c>EntraId</c>).</summary>
@@ -99,7 +106,9 @@ public abstract class CachingAccessTokenProvider : IAccessTokenProvider, IDispos
             using var activity = SecurityDiagnostics.StartTokenAcquisition(ProviderName);
             try
             {
-                var token = await AcquireTokenAsync(scopes, cancellationToken).ConfigureAwait(false);
+                var token = _circuitBreaker is null
+                    ? await AcquireTokenAsync(scopes, cancellationToken).ConfigureAwait(false)
+                    : await _circuitBreaker.ExecuteAsync(ct => AcquireTokenAsync(scopes, ct), cancellationToken).ConfigureAwait(false);
                 entry.Token = token;
                 SecurityDiagnostics.RecordTokenAcquisition(ProviderName, cacheHit: false, Stopwatch.GetElapsedTime(start).TotalSeconds, null);
                 return token;

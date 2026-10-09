@@ -185,4 +185,43 @@ public sealed class EntraIdClientOptions
 
     /// <summary>Credencial da aplicação.</summary>
     public EntraIdCredentialOptions Credential { get; set; } = new();
+
+    /// <summary>Retentativa e circuit breaker das chamadas ao Entra ID (tokens da aplicação e On-Behalf-Of).</summary>
+    public EntraIdResilienceOptions Resilience { get; set; } = new();
+}
+
+/// <summary>
+/// Resiliência das chamadas ao Entra ID feitas por <c>AddEntraIdClient</c>. Configuração: <c>EntraId:Client:Resilience</c>.
+/// </summary>
+/// <remarks>
+/// <para><b>Retentativa</b> (só On-Behalf-Of; os tokens da aplicação usam a retentativa do Azure.Identity): falha de rede, tempo
+/// limite, HTTP 408, 429 e 5xx, com backoff exponencial e jitter, respeitando <c>Retry-After</c> até <see cref="MaxRetryDelay"/>.
+/// Erros OAuth (<c>invalid_grant</c>, <c>interaction_required</c>...) nunca são repetidos.</para>
+/// <para><b>Circuit breaker</b>: um para os tokens da aplicação e outro para o On-Behalf-Of. No On-Behalf-Of só contam as falhas
+/// de infraestrutura acima (um <c>invalid_grant</c> é do usuário, não do Entra ID). Com o circuito aberto, a chamada falha na hora
+/// com <c>SecurityTokenAcquisitionException</c> (HTTP 502), sem chegar ao Entra ID; o token da aplicação ainda válido continua
+/// em uso.</para>
+/// </remarks>
+public sealed class EntraIdResilienceOptions
+{
+    /// <summary>Tentativas extras do On-Behalf-Of em falhas transitórias (0 a 5). Padrão: 2.</summary>
+    public int MaxRetries { get; set; } = 2;
+
+    /// <summary>Maior espera entre tentativas, inclusive a pedida por <c>Retry-After</c> (0 a 60 segundos). Padrão: 10 segundos.</summary>
+    /// <remarks>Um <c>Retry-After</c> maior encerra as tentativas na hora.</remarks>
+    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Circuit breaker (ligado por padrão).</summary>
+    public TEC.Security.Resilience.SecurityCircuitBreakerOptions CircuitBreaker { get; set; } = new();
+
+    internal void Validate(string context)
+    {
+        if (MaxRetries is < 0 or > 5)
+            throw new InvalidOperationException($"{context}: Resilience.MaxRetries deve estar entre 0 e 5.");
+        if (MaxRetryDelay < TimeSpan.Zero || MaxRetryDelay > TimeSpan.FromSeconds(60))
+            throw new InvalidOperationException($"{context}: Resilience.MaxRetryDelay deve estar entre 0 e 60 segundos.");
+        if (CircuitBreaker is null)
+            throw new InvalidOperationException($"{context}: Resilience.CircuitBreaker é obrigatório.");
+        CircuitBreaker.Validate($"{context}: Resilience.CircuitBreaker");
+    }
 }

@@ -84,8 +84,9 @@ internal sealed class EntraIdOnBehalfOfHandler(
         try
         {
             string tokenEndpoint = cloud.TokenEndpoint(tenantId);
-            var client = await credential.GetClientAuthenticationAsync(tokenEndpoint, cancellationToken).ConfigureAwait(false);
-            var token = await endpoint.OnBehalfOfAsync(tokenEndpoint, clientId, client, userToken, _scopes, cancellationToken).ConfigureAwait(false);
+            // Autenticação da aplicação a cada tentativa (assertion nova, com jti próprio, em cada retentativa)
+            var token = await endpoint.OnBehalfOfAsync(tokenEndpoint, clientId,
+                ct => credential.GetClientAuthenticationAsync(tokenEndpoint, ct), userToken, _scopes, cancellationToken).ConfigureAwait(false);
 
             var lifetime = token.ExpiresOn - time.GetUtcNow() - CachingAccessTokenProvider.RefreshBefore;
             if (lifetime > TimeSpan.Zero)

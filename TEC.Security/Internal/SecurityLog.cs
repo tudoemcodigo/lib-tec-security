@@ -40,4 +40,14 @@ internal static partial class SecurityLog
     [LoggerMessage(3121, LogLevel.Warning,
         "Segurança: requisição bloqueada, o destino não pode receber o token de serviço (fora de AllowedHosts ou sem HTTPS; host '{Host}').")]
     public static partial void TokenNotAttached(ILogger logger, string host);
+
+    [LoggerMessage(3123, LogLevel.Warning,
+        "Segurança {Provider}: circuito aberto após falhas repetidas do provedor de identidade; chamadas recusadas por {BreakSeconds} s.")]
+    public static partial void CircuitOpened(ILogger logger, string provider, double breakSeconds);
+
+    [LoggerMessage(3124, LogLevel.Information, "Segurança {Provider}: circuito meio-aberto; testando o provedor de identidade com uma chamada.")]
+    public static partial void CircuitHalfOpened(ILogger logger, string provider);
+
+    [LoggerMessage(3125, LogLevel.Information, "Segurança {Provider}: circuito fechado; o provedor de identidade voltou a responder.")]
+    public static partial void CircuitClosed(ILogger logger, string provider);
 }

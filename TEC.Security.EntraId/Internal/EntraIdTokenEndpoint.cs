@@ -1,6 +1,10 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Net;
 using System.Text.Json;
+using Polly;
+using Polly.Retry;
+using TEC.Security.Resilience;
 
 namespace TEC.Security.EntraId.Internal;
 
@@ -11,9 +15,25 @@ namespace TEC.Security.EntraId.Internal;
 /// <remarks>
 /// A resposta é lida com teto de <see cref="MaxResponseBytes"/> mesmo sem <c>Content-Length</c> (resposta em partes): um
 /// endpoint adulterado ou um proxy defeituoso não consegue esgotar a memória do processo.
+/// <para>Falha de rede, tempo limite, HTTP 408, 429 e 5xx são repetidos (<see cref="EntraIdResilienceOptions"/>); erros OAuth
+/// nunca. O circuit breaker, se houver, fica por fora das retentativas e só conta essas falhas transitórias.</para>
 /// </remarks>
-internal sealed class EntraIdTokenEndpoint(HttpClient http, TimeProvider time)
+internal sealed class EntraIdTokenEndpoint
 {
+    private readonly HttpClient _http;
+    private readonly TimeProvider _time;
+    private readonly ResiliencePipeline _retry;
+    private readonly SecurityCircuitBreaker? _circuitBreaker;
+
+    public EntraIdTokenEndpoint(HttpClient http, TimeProvider time, EntraIdResilienceOptions? resilience = null,
+        SecurityCircuitBreaker? circuitBreaker = null)
+    {
+        _http = http;
+        _time = time;
+        _circuitBreaker = circuitBreaker;
+        _retry = CreateRetry(resilience ?? new EntraIdResilienceOptions { MaxRetries = 0 }, time);
+    }
+
     public const string HttpClientName = "TEC.Security.EntraId.TokenEndpoint";
 
     internal const int MaxResponseBytes = 64 * 1024;
@@ -21,8 +41,17 @@ internal sealed class EntraIdTokenEndpoint(HttpClient http, TimeProvider time)
     /// <summary>Validade máxima aceita para o token devolvido (o Entra ID emite tokens de 60 a 90 minutos).</summary>
     private static readonly TimeSpan MaxLifetime = TimeSpan.FromHours(24);
 
-    public async Task<Abstractions.AccessToken> OnBehalfOfAsync(string tokenEndpoint, string clientId, ClientAuthentication client,
-        string userAssertion, IReadOnlyList<string> scopes, CancellationToken cancellationToken)
+    public Task<Abstractions.AccessToken> OnBehalfOfAsync(string tokenEndpoint, string clientId, ClientAuthentication client,
+        string userAssertion, IReadOnlyList<string> scopes, CancellationToken cancellationToken) =>
+        OnBehalfOfAsync(tokenEndpoint, clientId, _ => Task.FromResult(client), userAssertion, scopes, cancellationToken);
+
+    /// <summary>
+    /// Troca On-Behalf-Of. A autenticação da aplicação é obtida <b>a cada tentativa</b>: uma client assertion assinada (com
+    /// <c>jti</c> próprio) nunca é reenviada, então uma retentativa não é recusada como repetição.
+    /// </summary>
+    public async Task<Abstractions.AccessToken> OnBehalfOfAsync(string tokenEndpoint, string clientId,
+        Func<CancellationToken, Task<ClientAuthentication>> clientAuthentication, string userAssertion, IReadOnlyList<string> scopes,
+        CancellationToken cancellationToken)
     {
         var form = new List<KeyValuePair<string, string>>
         {
@@ -33,6 +62,26 @@ internal sealed class EntraIdTokenEndpoint(HttpClient http, TimeProvider time)
             new("scope", string.Join(' ', scopes))
         };
 
+        var state = (Endpoint: this, Url: tokenEndpoint, Form: form, Client: clientAuthentication);
+        if (_circuitBreaker is null)
+            return await SendWithRetryAsync(state, cancellationToken).ConfigureAwait(false);
+
+        return await _circuitBreaker.ExecuteAsync(ct => SendWithRetryAsync(state, ct), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Falhas que contam para o circuit breaker do On-Behalf-Of: só as transitórias (as que seriam repetidas).</summary>
+    internal static bool IsTransient(Exception exception) => exception is TransientTokenEndpointException;
+
+    private ValueTask<Abstractions.AccessToken> SendWithRetryAsync(
+        (EntraIdTokenEndpoint Endpoint, string Url, List<KeyValuePair<string, string>> Form, Func<CancellationToken, Task<ClientAuthentication>> Client) state,
+        CancellationToken cancellationToken) =>
+        _retry.ExecuteAsync(static (s, ct) => s.Endpoint.SendOnceAsync(s.Url, s.Form, s.Client, ct), state, cancellationToken);
+
+    private async ValueTask<Abstractions.AccessToken> SendOnceAsync(string tokenEndpoint, List<KeyValuePair<string, string>> baseForm,
+        Func<CancellationToken, Task<ClientAuthentication>> clientAuthentication, CancellationToken cancellationToken)
+    {
+        var client = await clientAuthentication(cancellationToken).ConfigureAwait(false);
+        var form = new List<KeyValuePair<string, string>>(baseForm);
         if (client.Secret is not null)
             form.Add(new("client_secret", client.Secret));
         else
@@ -41,15 +90,73 @@ internal sealed class EntraIdTokenEndpoint(HttpClient http, TimeProvider time)
             form.Add(new("client_assertion", client.Assertion!));
         }
 
+        // Uma requisição por tentativa (HttpRequestMessage não pode ser reenviada)
         using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint) { Content = new FormUrlEncodedContent(form) };
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (response.Content.Headers.ContentLength > MaxResponseBytes)
-            throw new HttpRequestException("Resposta do endpoint de token grande demais.");
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new TransientTokenEndpointException("Falha de rede ao chamar o endpoint de token.", null, null, exception);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Tempo limite do HttpClient (não é cancelamento do chamador)
+            throw new TransientTokenEndpointException("Tempo limite ao chamar o endpoint de token.", null, null, exception);
+        }
 
-        byte[] body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
-        return Parse(body, response.IsSuccessStatusCode, (int)response.StatusCode, time.GetUtcNow());
+        using (response)
+        {
+            int status = (int)response.StatusCode;
+            if (status is 408 or 429 or >= 500)
+            {
+                throw new TransientTokenEndpointException($"Endpoint de token indisponível (HTTP {status}).", response.StatusCode,
+                    RetryAfter(response, _time.GetUtcNow()));
+            }
+
+            if (response.Content.Headers.ContentLength > MaxResponseBytes)
+                throw new HttpRequestException("Resposta do endpoint de token grande demais.");
+
+            byte[] body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            return Parse(body, response.IsSuccessStatusCode, status, _time.GetUtcNow());
+        }
+    }
+
+    private static ResiliencePipeline CreateRetry(EntraIdResilienceOptions options, TimeProvider time)
+    {
+        var builder = new ResiliencePipelineBuilder { TimeProvider = time };
+        if (options.MaxRetries == 0)
+            return builder.Build();
+
+        var maxDelay = options.MaxRetryDelay;
+        return builder.AddRetry(new RetryStrategyOptions
+        {
+            MaxRetryAttempts = options.MaxRetries,
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            Delay = maxDelay < TimeSpan.FromMilliseconds(500) ? maxDelay : TimeSpan.FromMilliseconds(500),
+            MaxDelay = maxDelay > TimeSpan.Zero ? maxDelay : null,
+            // Retry-After acima do limite: desiste na hora em vez de segurar a requisição do usuário
+            ShouldHandle = args => ValueTask.FromResult(args.Outcome.Exception is TransientTokenEndpointException failure
+                && (failure.RetryAfter is null || failure.RetryAfter <= maxDelay)),
+            DelayGenerator = static args => ValueTask.FromResult(
+                args.Outcome.Exception is TransientTokenEndpointException { RetryAfter: { } retryAfter } ? (TimeSpan?)retryAfter : null)
+        }).Build();
+    }
+
+    /// <summary>Espera pedida em <c>Retry-After</c> (segundos ou data), ou <c>null</c>.</summary>
+    internal static TimeSpan? RetryAfter(HttpResponseMessage response, DateTimeOffset now)
+    {
+        var header = response.Headers.RetryAfter;
+        if (header?.Delta is { } delta)
+            return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        if (header?.Date is { } date)
+            return date <= now ? TimeSpan.Zero : date - now;
+        return null;
     }
 
     /// <summary>Interpreta a resposta do endpoint de token (separado da rede para os testes).</summary>
@@ -114,6 +221,13 @@ internal sealed class EntraIdTokenEndpoint(HttpClient http, TimeProvider time)
 
             return buffer.ToArray();
         }
+    }
+
+    /// <summary>Falha transitória do endpoint de token (rede, tempo limite, 408, 429, 5xx): repetida e contada pelo circuit breaker.</summary>
+    internal sealed class TransientTokenEndpointException(string message, HttpStatusCode? statusCode, TimeSpan? retryAfter,
+        Exception? innerException = null) : HttpRequestException(message, innerException, statusCode)
+    {
+        public TimeSpan? RetryAfter { get; } = retryAfter;
     }
 
     /// <summary>Código de erro OAuth (ex.: <c>invalid_grant</c>) ou marcador fixo, para não levar texto arbitrário ao log.</summary>

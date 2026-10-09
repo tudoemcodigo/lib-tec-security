@@ -14,8 +14,9 @@ public sealed class EntraIdAccessTokenProvider : CachingAccessTokenProvider
 {
     private readonly TokenCredential _credential;
 
-    internal EntraIdAccessTokenProvider(EntraIdClientCredential credential, TimeProvider? time, ILogger<EntraIdAccessTokenProvider>? logger)
-        : base(EntraIdTenantPolicy.ProviderName, time, logger)
+    internal EntraIdAccessTokenProvider(EntraIdClientCredential credential, TimeProvider? time, ILogger<EntraIdAccessTokenProvider>? logger,
+        TEC.Security.Resilience.SecurityCircuitBreaker? circuitBreaker = null)
+        : base(EntraIdTenantPolicy.ProviderName, time, logger, circuitBreaker)
     {
         _credential = credential.CreateTokenCredential();
     }

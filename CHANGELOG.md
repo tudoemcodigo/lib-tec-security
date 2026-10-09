@@ -2,6 +2,24 @@
 
 Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o projeto usa [Versionamento Semântico](https://semver.org/lang/pt-BR/). Enquanto a versão for `0.x`, mudanças incompatíveis podem ocorrer em versões MINOR. Os quatro pacotes saem sempre com a mesma versão.
 
+## [0.1.0] - 2026-10-09
+
+### ✨ Adicionado
+
+#### 🛡️ TEC.Security
+
+- **Circuit breaker para provedores de identidade** (`SecurityCircuitBreaker`, `SecurityCircuitBreakerOptions`, `SecurityCircuitOpenException`, com `Polly.Core`). `CachingAccessTokenProvider` aceita um circuito em volta de `AcquireTokenAsync`: aberto, a renovação falha na hora e o token atual ainda válido continua em uso. Na chamada de teste (meia-abertura), cancelamento conta como falha. Métrica `security.circuit.state_changes` e eventos 3123–3125.
+
+#### 🪪 TEC.Security.EntraId
+
+- **Resiliência em `EntraIdClientOptions.Resilience`** (`EntraId:Client:Resilience`): retentativa do On-Behalf-Of só em falha de rede, tempo limite, 408, 429 e 5xx, com backoff exponencial, jitter e `Retry-After` limitado por `MaxRetryDelay`; erros OAuth (`invalid_grant`, `interaction_required`...) nunca são repetidos. A client assertion é gerada a cada tentativa.
+- Circuit breaker ligado por padrão para os tokens da aplicação e para o On-Behalf-Of (este conta só falhas transitórias: o `invalid_grant` de um usuário não derruba os outros).
+
+### 🔁 Alterado
+
+- Tempo limite do `HttpClient` do On-Behalf-Of agora é repetido e, esgotadas as tentativas, vira `SecurityTokenAcquisitionException` (antes escapava como `OperationCanceledException`).
+- Nova dependência: `Polly.Core` 8.8.0 (sem dependências próprias em net8/net10, compatível com Native AOT).
+
 ## [0.0.1] - 2026-10-08
 
 Primeira versão. Nada foi publicado ainda: esta entrada descreve o que os pacotes oferecem.

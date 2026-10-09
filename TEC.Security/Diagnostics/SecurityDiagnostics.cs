@@ -31,6 +31,8 @@ public static class SecurityDiagnostics
     /// <c>security.reason</c> (<c>permission</c>, <c>role</c>, <c>scope</c>, <c>kind</c>, <c>scheme</c>).</description></item>
     /// <item><description><see cref="TokenAcquisitionDurationName"/> (histograma, segundos): obtenção de tokens de serviço, com
     /// <c>security.provider</c>, <c>security.cache</c> (<c>hit</c>/<c>miss</c>) e, em falha, <c>error.type</c>.</description></item>
+    /// <item><description><see cref="CircuitStateChangesName"/> (contador): mudanças de estado do circuit breaker, com
+    /// <c>security.provider</c> e <c>security.circuit.state</c> (<c>open</c>, <c>half_open</c>, <c>closed</c>).</description></item>
     /// </list>
     /// </summary>
     public const string MeterName = "TEC.Security";
@@ -44,11 +46,18 @@ public static class SecurityDiagnostics
     /// <summary>Histograma da obtenção de tokens de serviço (segundos).</summary>
     public const string TokenAcquisitionDurationName = "security.token.acquisition.duration";
 
+    /// <summary>Contador de mudanças de estado do circuit breaker.</summary>
+    public const string CircuitStateChangesName = "security.circuit.state_changes";
+
     internal const string SchemeTag = "security.scheme";
     internal const string ReasonTag = "security.reason";
     internal const string ProviderTag = "security.provider";
     internal const string CacheTag = "security.cache";
     internal const string ErrorTypeTag = "error.type";
+    internal const string CircuitStateTag = "security.circuit.state";
+    internal const string CircuitOpen = "open";
+    internal const string CircuitHalfOpen = "half_open";
+    internal const string CircuitClosed = "closed";
 
     internal static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 
@@ -62,6 +71,9 @@ public static class SecurityDiagnostics
 
     private static readonly Histogram<double> TokenAcquisitionDuration = Meter.CreateHistogram<double>(
         TokenAcquisitionDurationName, unit: "s", description: "Duração da obtenção de tokens de serviço.");
+
+    private static readonly Counter<long> CircuitStateChanges = Meter.CreateCounter<long>(
+        CircuitStateChangesName, unit: "{change}", description: "Mudanças de estado do circuit breaker dos provedores de identidade.");
 
     /// <summary>Registra uma autenticação recusada. Uso pelos pacotes de provedor.</summary>
     public static void RecordAuthenticationFailure(string scheme, string reason)
@@ -99,5 +111,12 @@ public static class SecurityDiagnostics
         var activity = ActivitySource.StartActivity("security.token.acquire", ActivityKind.Client);
         activity?.SetTag(ProviderTag, provider);
         return activity;
+    }
+
+    /// <summary>Registra uma mudança de estado do circuito.</summary>
+    internal static void RecordCircuitState(string provider, string state)
+    {
+        if (CircuitStateChanges.Enabled)
+            CircuitStateChanges.Add(1, new KeyValuePair<string, object?>(ProviderTag, provider), new KeyValuePair<string, object?>(CircuitStateTag, state));
     }
 }
