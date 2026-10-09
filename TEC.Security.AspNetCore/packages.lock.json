@@ -90,8 +90,15 @@
       "tec.security": {
         "type": "Project",
         "dependencies": {
+          "Polly.Core": "[8.8.0, )",
           "TEC.Core": "[0.0.1, )"
         }
+      },
+      "Polly.Core": {
+        "type": "CentralTransitive",
+        "requested": "[8.8.0, )",
+        "resolved": "8.8.0",
+        "contentHash": "TewV9uNFsoRFggoFbTAGFwsMYPuckA+wTIpQPyhLL9BANRPQRENz2S4bwATrB3HBOakN5oKLFIllPiDnVecmJg=="
       },
       "TEC.Core": {
         "type": "CentralTransitive",
@@ -284,6 +291,7 @@
           "Microsoft.Extensions.Http": "[10.0.12, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Options.ConfigurationExtensions": "[10.0.12, )",
+          "Polly.Core": "[8.8.0, )",
           "TEC.Core": "[0.0.1, )"
         }
       },
@@ -359,6 +367,12 @@
           "Microsoft.Extensions.Options": "10.0.12",
           "Microsoft.Extensions.Primitives": "10.0.12"
         }
+      },
+      "Polly.Core": {
+        "type": "CentralTransitive",
+        "requested": "[8.8.0, )",
+        "resolved": "8.8.0",
+        "contentHash": "TewV9uNFsoRFggoFbTAGFwsMYPuckA+wTIpQPyhLL9BANRPQRENz2S4bwATrB3HBOakN5oKLFIllPiDnVecmJg=="
       },
       "TEC.Core": {
         "type": "CentralTransitive",

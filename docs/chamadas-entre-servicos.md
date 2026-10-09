@@ -14,6 +14,7 @@
   - [On-Behalf-Of](#on-behalf-of)
   - [Token direto, sem HttpClient](#token-direto-sem-httpclient)
   - [Provedor de token próprio](#provedor-de-token-próprio)
+  - [Resiliência: retentativa e circuit breaker](#resiliência-retentativa-e-circuit-breaker)
   - [Tratar a falha do provedor](#tratar-a-falha-do-provedor)
 - [⚙️ Opções](#️-opções)
 - [❌ Erros](#-erros)
@@ -173,6 +174,38 @@ builder.Services.AddHttpClient("relatorios", c => c.BaseAddress = new Uri("https
     });
 ```
 
+### Resiliência: retentativa e circuit breaker
+
+Ligados por padrão em `AddEntraIdClient` (`EntraIdClientOptions.Resilience`, configuração `EntraId:Client:Resilience`):
+
+- **On-Behalf-Of:** falha de rede, tempo limite, HTTP 408, 429 e 5xx são repetidos até `MaxRetries` vezes (padrão 2), com
+  backoff exponencial e jitter, respeitando `Retry-After` até `MaxRetryDelay` (padrão 10 s; acima disso desiste na hora).
+  Erros OAuth (`invalid_grant`, `interaction_required`, `invalid_client`...) **nunca** são repetidos.
+- **Client credentials:** a retentativa é a do Azure.Identity.
+- **Circuit breaker** (`Polly.Core`), um para cada fluxo (`EntraId` e `EntraId.OnBehalfOf`), por fora das retentativas. Com
+  falhas demais na janela, abre: as chamadas seguintes lançam `SecurityTokenAcquisitionException` na hora, com
+  `SecurityCircuitOpenException` em `InnerException`, sem chegar ao Entra ID. No On-Behalf-Of só contam as falhas
+  transitórias acima: o `invalid_grant` de um usuário não derruba os outros. O token da aplicação ainda válido continua em uso
+  com o circuito aberto (log 3122).
+- Na chamada de teste (meia-abertura), cancelamento conta como falha: o circuito só fecha com resposta do Entra ID.
+- A client assertion é gerada **a cada tentativa** (novo `jti`): uma retentativa nunca reenvia a mesma assertion.
+
+```json
+{
+  "EntraId": {
+    "Client": {
+      "Resilience": {
+        "MaxRetries": 2,
+        "MaxRetryDelay": "00:00:10",
+        "CircuitBreaker": { "FailureRatio": 0.5, "MinimumThroughput": 10, "SamplingDuration": "00:00:30", "BreakDuration": "00:00:30" }
+      }
+    }
+  }
+}
+```
+
+Num provedor de token próprio, passe um `SecurityCircuitBreaker` ao construtor de `CachingAccessTokenProvider`.
+
 ### Tratar a falha do provedor
 
 `SecurityTokenAcquisitionException` deriva de `AppException` do TEC.Core (código `SEGURANCA_PROVEDOR_INDISPONIVEL`, HTTP
@@ -211,6 +244,17 @@ Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de 
 | `TenantId` | `null` | Tenant da aplicação (GUID). Obrigatório, exceto com `ManagedIdentity` e `Developer` |
 | `ClientId` | `null` | Client id da app registration (GUID). Obrigatório, exceto com `ManagedIdentity` e `Developer` |
 | `Credential` | `ManagedIdentityFederation` | `EntraIdCredentialOptions` |
+| `Resilience` | ligado | `EntraIdResilienceOptions`: `MaxRetries` (0 a 5, padrão 2), `MaxRetryDelay` (0 a 60 s, padrão 10 s) e `CircuitBreaker` (abaixo) |
+
+**`SecurityCircuitBreakerOptions`** (`TEC.Security.Resilience`)
+
+| Opção | Padrão | Descrição |
+|---|---|---|
+| `Enabled` | `true` | Liga o circuit breaker |
+| `FailureRatio` | `0.5` | Proporção de falhas que abre o circuito (> 0 e ≤ 1) |
+| `MinimumThroughput` | `10` | Mínimo de chamadas na janela (2 a 10.000) |
+| `SamplingDuration` | `30 s` | Janela de amostragem (0,5 s a 1 h) |
+| `BreakDuration` | `30 s` | Tempo aberto antes da chamada de teste (0,5 s a 1 h) |
 
 **`AccessTokenHandlerOptions`** (`TEC.Security.Tokens`)
 
@@ -230,6 +274,7 @@ Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de 
 | `MinimumRemainingLifetime` | 30 segundos | Validade restante mínima para continuar usando o token atual se a renovação falhar |
 | `MaxScopeSets` | 1024 | Conjuntos de escopos distintos em cache |
 | `ProviderName` | (construtor) | Nome nas métricas e logs |
+| `circuitBreaker` | (construtor, opcional) | `SecurityCircuitBreaker` em volta de `AcquireTokenAsync`; aberto, a renovação falha na hora e a regra do token atual continua valendo |
 | `AcquireTokenAsync(scopes, ct)` | abstrato | Obtém um token novo, sem cache |
 
 **Outros tipos:** `IAccessTokenProvider.GetTokenAsync(IReadOnlyList<string> scopes, CancellationToken)` →

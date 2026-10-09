@@ -63,6 +63,7 @@ builder.Services.AddOpenTelemetry()
 | `security.authentication.failures` | Contador | `{failure}` | `security.scheme`, `security.reason` |
 | `security.authorization.denied` | Contador | `{denial}` | `security.scheme` (`none` sem esquema), `security.reason` |
 | `security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`EntraId`, `EntraId.OnBehalfOf`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
+| `security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`EntraId`, `EntraId.OnBehalfOf`), `security.circuit.state` (`open`, `half_open`, `closed`) |
 
 | `security.reason` (autenticação) | Origem |
 |---|---|
@@ -101,6 +102,9 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | 3120 | Error | Provedor de token | Falha ao obter token de serviço sem token válido em cache (tipo da exceção) |
 | 3121 | Warning | `AccessTokenHandler` | Requisição bloqueada: destino fora de `AllowedHosts`/sem HTTPS (host) |
 | 3122 | Warning | Provedor de token | Renovação falhou; o token atual, ainda válido por mais de 30 s, continua em uso |
+| 3123 | Warning | Circuit breaker | Circuito aberto após falhas repetidas do provedor de identidade (duração da pausa) |
+| 3124 | Information | Circuit breaker | Circuito meio-aberto: chamada de teste |
+| 3125 | Information | Circuit breaker | Circuito fechado: o provedor voltou a responder |
 | 3201 | Information | `TEC.Security.AspNetCore.JwtBearer` | Token recusado (tipo da exceção ou motivo; nunca a mensagem) |
 | 3202 | Information | Esquemas `TEC.None` e de API key | Credencial recusada (não reconhecida, dois headers de API key, API key sem HTTPS) |
 | 3203 | Information | `TecAuthorizationHandler` | **Auditoria:** acesso negado (endpoint, tipo, id, esquema, tenant, motivo). Sem endpoint, o caminho aparece só como tamanho + HMAC (`SensitiveDataMasker.DescribeUntrusted`) |
@@ -117,6 +121,7 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 - Pico de 3201/3202 e de `security.authentication.failures` (varredura de tokens).
 - 3110 repetido para o mesmo id (chave vazada ou integração quebrada); 3110 com `chave expirada` (rotação esquecida).
 - 3203 repetido para o mesmo id (tentativa de escalonamento).
+- 3123 (circuito aberto: o provedor de identidade está falhando para todos os usuários).
 - Qualquer 3003, 3101, 3111, 3120, 3401 ou 3402 (falha de infraestrutura ou configuração); 3122 frequente (provedor
   instável).
 - 3403 em produção (multi-tenant sem permissões por tenant).
@@ -133,6 +138,7 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | `AuthenticationFailuresName` | `"security.authentication.failures"` |
 | `AuthorizationDeniedName` | `"security.authorization.denied"` |
 | `TokenAcquisitionDurationName` | `"security.token.acquisition.duration"` |
+| `CircuitStateChangesName` | `"security.circuit.state_changes"` |
 | `RecordAuthenticationFailure(scheme, reason)` | Para pacotes de provedor |
 | `RecordAuthorizationDenied(scheme, reason)` | Para pacotes de provedor |
 | `RecordTokenAcquisition(provider, cacheHit, seconds, errorType)` | Para provedores de token próprios |

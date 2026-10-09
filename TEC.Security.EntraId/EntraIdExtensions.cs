@@ -17,6 +17,7 @@ using TEC.Security.DependencyInjection;
 using TEC.Security.EntraId.Internal;
 using TEC.Core.Threading;
 using TEC.Security.Tokens;
+using TEC.Security.Resilience;
 using JwtTokenValidatedContext = Microsoft.AspNetCore.Authentication.JwtBearer.TokenValidatedContext;
 using OidcTokenValidatedContext = Microsoft.AspNetCore.Authentication.OpenIdConnect.TokenValidatedContext;
 
@@ -214,15 +215,21 @@ public static class EntraIdExtensions
             throw new InvalidOperationException("Entra ID (cliente): Instance deve ser uma instância oficial do Entra ID (ex.: https://login.microsoftonline.com/).");
         EntraIdClientCredential.Validate(options.Credential, options.TenantId, options.ClientId,
             VaultEnvironment.FindHostEnvironment(builder.Services), requireClientAuthentication: false, "Entra ID (cliente)");
+        (options.Resilience ?? throw new InvalidOperationException("Entra ID (cliente): Resilience é obrigatório.")).Validate("Entra ID (cliente)");
 
         builder.Properties[typeof(EntraIdClientOptions)] = options;
 
         var services = builder.Services;
         services.AddHttpClient(EntraIdTokenEndpoint.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton(sp => new EntraIdClientRegistration(cloud, options,
-            new EntraIdClientCredential(cloud, options.TenantId, options.ClientId, options.Credential, sp)));
-        services.AddSingleton(sp => new EntraIdAccessTokenProvider(sp.GetRequiredService<EntraIdClientRegistration>().Credential,
-            sp.GetService<TimeProvider>(), sp.GetService<ILogger<EntraIdAccessTokenProvider>>()));
+            new EntraIdClientCredential(cloud, options.TenantId, options.ClientId, options.Credential, sp),
+            sp.GetService<TimeProvider>() ?? TimeProvider.System, sp.GetService<ILoggerFactory>()));
+        services.AddSingleton(sp =>
+        {
+            var registration = sp.GetRequiredService<EntraIdClientRegistration>();
+            return new EntraIdAccessTokenProvider(registration.Credential, sp.GetService<TimeProvider>(),
+                sp.GetService<ILogger<EntraIdAccessTokenProvider>>(), registration.AccessTokenCircuit);
+        });
         services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<EntraIdAccessTokenProvider>());
         return builder;
     }
@@ -277,7 +284,8 @@ public static class EntraIdExtensions
 
             var time = sp.GetService<TimeProvider>() ?? TimeProvider.System;
             return new EntraIdOnBehalfOfHandler(sp.GetRequiredService<IHttpContextAccessor>(), registration.Credential,
-                new EntraIdTokenEndpoint(sp.GetRequiredService<IHttpClientFactory>().CreateClient(EntraIdTokenEndpoint.HttpClientName), time),
+                new EntraIdTokenEndpoint(sp.GetRequiredService<IHttpClientFactory>().CreateClient(EntraIdTokenEndpoint.HttpClientName), time,
+                    registration.Options.Resilience, registration.OnBehalfOfCircuit),
                 registration.Cloud, registration.Options.ClientId, options, registration.OnBehalfOfCache, registration.OnBehalfOfFlights,
                 time, sp.GetRequiredService<ILogger<EntraIdOnBehalfOfHandler>>());
         });
@@ -307,8 +315,20 @@ public static class EntraIdExtensions
 }
 
 /// <summary>Identidade da aplicação registrada por <c>AddEntraIdClient</c>.</summary>
-internal sealed class EntraIdClientRegistration(EntraIdCloud cloud, EntraIdClientOptions options, EntraIdClientCredential credential) : IDisposable
+internal sealed class EntraIdClientRegistration(EntraIdCloud cloud, EntraIdClientOptions options, EntraIdClientCredential credential,
+    TimeProvider? time = null, ILoggerFactory? loggerFactory = null) : IDisposable
 {
+    /// <summary>Circuit breaker dos tokens da aplicação (client credentials); <c>null</c> = desligado.</summary>
+    public SecurityCircuitBreaker? AccessTokenCircuit { get; } = SecurityCircuitBreaker.Create(EntraIdTenantPolicy.ProviderName,
+        options.Resilience.CircuitBreaker, timeProvider: time, logger: loggerFactory?.CreateLogger<EntraIdAccessTokenProvider>());
+
+    /// <summary>
+    /// Circuit breaker do On-Behalf-Of (singleton: os handlers são recriados pelo <c>IHttpClientFactory</c>). Só falhas
+    /// transitórias do endpoint de token contam; <c>null</c> = desligado.
+    /// </summary>
+    public SecurityCircuitBreaker? OnBehalfOfCircuit { get; } = SecurityCircuitBreaker.Create(EntraIdTenantPolicy.ProviderName + ".OnBehalfOf",
+        options.Resilience.CircuitBreaker, EntraIdTokenEndpoint.IsTransient, time, loggerFactory?.CreateLogger<EntraIdOnBehalfOfHandler>());
+
     public EntraIdCloud Cloud => cloud;
 
     public EntraIdClientOptions Options => options;
