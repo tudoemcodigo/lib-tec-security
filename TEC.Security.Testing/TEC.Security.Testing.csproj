@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Configurações de build, segurança, AOT e metadados comuns: ..\Directory.Build.props -->
+
+  <PropertyGroup>
+    <RootNamespace>TEC.Security.Testing</RootNamespace>
+    <Description>Testa APIs protegidas pelo TEC.Security sem provedor de identidade real: emite tokens assinados com usuário, tenant, papéis e escopos sob medida, bloqueado fora dos ambientes de desenvolvimento e teste.</Description>
+    <PackageTags>security;testing;jwt;integration-tests;tec</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TEC.Security.AspNetCore\TEC.Security.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>
