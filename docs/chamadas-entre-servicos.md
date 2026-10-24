@@ -2,8 +2,8 @@
 
 # 🔁 Chamadas entre serviços
 
-> Como um serviço chama outro com token do Entra ID, em nome da própria aplicação (client credentials) ou do usuário da
-> requisição (On-Behalf-Of), sem segredo na configuração e sem o token escapar para outro host.
+> Como um serviço chama outro com o token da própria aplicação (OAuth 2.0 client credentials), sem segredo na configuração
+> e sem o token escapar para outro host, e como escrever um provedor de token próprio com cache e circuit breaker.
 
 ## 📑 Sumário
 
@@ -11,10 +11,9 @@
 - [🚀 Uso](#-uso)
   - [Identidade da aplicação](#identidade-da-aplicação)
   - [Client credentials num HttpClient](#client-credentials-num-httpclient)
-  - [On-Behalf-Of](#on-behalf-of)
   - [Token direto, sem HttpClient](#token-direto-sem-httpclient)
   - [Provedor de token próprio](#provedor-de-token-próprio)
-  - [Resiliência: retentativa e circuit breaker](#resiliência-retentativa-e-circuit-breaker)
+  - [Resiliência: circuit breaker](#resiliência-circuit-breaker)
   - [Tratar a falha do provedor](#tratar-a-falha-do-provedor)
 - [⚙️ Opções](#️-opções)
 - [❌ Erros](#-erros)
@@ -28,19 +27,25 @@
 ```mermaid
 flowchart LR
     APP["HttpClient da aplicação"] --> H{"Host em AllowedHosts<br/>e HTTPS?"}
-    H -->|não| X["HttpRequestException<br/>log 3121"]
-    H -->|sim| C{"Fluxo"}
-    C -->|client credentials| P["EntraIdAccessTokenProvider<br/>cache por conjunto de escopos"]
-    C -->|On-Behalf-Of| O["Token do usuário da requisição<br/>uma troca por usuário + escopos"]
-    P --> E["Entra ID<br/>credencial sem segredo"]
-    O --> E
+    H -->|não| X["HttpRequestException<br/>log 3121 (com logger)"]
+    H -->|sim| P["IAccessTokenProvider<br/>cache por client id + escopos"]
+    P -->|"cache vencido"| CB{"Circuit breaker<br/>fechado?"}
+    CB -->|sim| E["Endpoint de token do IdP<br/>grant_type=client_credentials"]
+    CB -->|não| F["SecurityCircuitOpenException"]
     E --> D["Serviço de destino<br/>Authorization: Bearer"]
+    P -->|"token válido"| D
 ```
 
-| Fluxo | Quem o destino vê | Exige |
+| Peça | Pacote | Papel |
 |---|---|---|
-| Client credentials (`AddEntraIdAccessToken`) | `Application`, com os app roles concedidos à sua aplicação | `AddEntraIdClient` com qualquer credencial |
-| On-Behalf-Of (`AddEntraIdOnBehalfOf`) | O mesmo usuário (`oid`), com os escopos delegados | `AddEntraIdClient` com a credencial da app registration da **própria API** e requisição autenticada por token Entra ID de usuário |
+| `AddOpenIdConnectClient` / `OpenIdConnectAccessTokenProvider` | `TEC.Security.OpenIdConnect` | Obtém o token por client credentials (segredo no TEC.Vault), com cache e circuit breaker |
+| `AddOpenIdConnectAccessToken` | `TEC.Security.OpenIdConnect` | Anexa o token a um `HttpClient` (`IHttpClientBuilder`) |
+| `AccessTokenHandler` / `AccessTokenHandlerOptions` | `TEC.Security` | `DelegatingHandler` genérico: anexa o `Bearer` só aos `AllowedHosts`, com HTTPS |
+| `CachingAccessTokenProvider` | `TEC.Security` | Base para provedores de token próprios |
+| `SecurityCircuitBreaker` | `TEC.Security` | Circuito sobre `Polly.Core` para o endpoint de token |
+
+O destino vê uma identidade de **aplicação** (token sem usuário). Não há On-Behalf-Of: o token do usuário da requisição nunca é
+repassado nem trocado.
 
 ---
 
@@ -48,84 +53,49 @@ flowchart LR
 
 ### Identidade da aplicação
 
-```json
-"Security": {
-  "EntraId": {
-    "Client": {
-      "TenantId": "<tenant-id>",
-      "ClientId": "<client-id-desta-aplicacao>",
-      "Credential": { "Type": "ManagedIdentityFederation" }
-    }
-  }
-}
-```
-
 ```csharp
+using TEC.Security.Abstractions;
 using TEC.Security.DependencyInjection;
-using TEC.Security.EntraId;
+using TEC.Security.OpenIdConnect;
 
 builder.Services.AddTecSecurity(builder.Configuration, security => security
-    .AddEntraIdClient(builder.Configuration.GetSection("Security:EntraId:Client")));
+    .AddOpenIdConnectClient(options =>
+    {
+        options.TokenEndpoint = "https://auth.empresa.com/realms/corporativo/protocol/openid-connect/token";
+        options.ClientId = "servico-faturamento";
+        options.ClientSecretName = "segredo-faturamento";   // lido do TEC.Vault (ISecretReader) a cada obtenção de token
+    }));
+
+// Limitação atual: o AddOpenIdConnectClient registra o IAccessTokenProvider como cliente tipado do HttpClient e o container
+// não consegue resolvê-lo (falta OpenIdConnectClientOptions). Registre o provedor à mão, depois do AddTecSecurity:
+builder.Services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<OpenIdConnectAccessTokenProvider>());
 ```
 
-Funciona também em workers (não depende de `AddAspNetCore`). Tipos de credencial e papéis no cofre:
-[🪪 Provedor Entra ID](provedor-entra-id.md#credencial-da-aplicação).
+Funciona também em workers (não depende de `AddAspNetCore`). Registre o TEC.Vault (`AddTecVault(...)`) para o `ClientSecretName`.
+Sem `TokenEndpoint`, o endpoint é `{Authority}/protocol/openid-connect/token` (padrão do Keycloak); no Entra ID informe
+`https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token` ([🪪 Provedor Entra ID](provedor-entra-id.md#chamar-outras-apis)).
+
+> [!WARNING]
+> Sem o registro explícito do `IAccessTokenProvider`, a resolução do `AddOpenIdConnectAccessToken` falha com
+> `Unable to resolve service for type 'OpenIdConnectClientOptions'`.
 
 ### Client credentials num HttpClient
 
 ```csharp
-builder.Services.AddHttpClient<EstoqueClient>(c => c.BaseAddress = new Uri("https://estoque.contoso.com/"))
-    .AddEntraIdAccessToken(o =>
+builder.Services.AddHttpClient<EstoqueClient>(c => c.BaseAddress = new Uri("https://estoque.empresa.com/"))
+    .AddOpenIdConnectAccessToken(o =>
     {
-        o.Scopes.Add("api://<client-id-do-estoque>/.default");
-        o.AllowedHosts.Add("estoque.contoso.com");
+        o.Scopes.Add("estoque.consultar");          // no Entra ID: "api://<client-id-do-estoque>/.default"
+        o.AllowedHosts.Add("estoque.empresa.com");
     });
 ```
 
-- O token é obtido uma vez por conjunto de escopos e renovado **5 minutos** antes de expirar (tokens de até 20 minutos: com
-  um quarto da validade restante); chamadas simultâneas
-  disparam uma única obtenção.
-- Se a renovação falhar e o token atual ainda valer mais de **30 segundos**, ele continua em uso (log 3122): uma
-  instabilidade passageira do Entra ID não derruba as chamadas.
-- Um header `Authorization` já presente na requisição é mantido.
-
-### On-Behalf-Of
-
-```csharp
-builder.Services.AddHttpClient<FinanceiroClient>(c => c.BaseAddress = new Uri("https://financeiro.contoso.com/"))
-    .AddEntraIdOnBehalfOf(o =>
-    {
-        o.Scopes.Add("api://<client-id-do-financeiro>/access_as_user");
-        o.AllowedHosts.Add("financeiro.contoso.com");
-    });
-```
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as Usuário
-    participant A as Sua API
-    participant E as Entra ID
-    participant F as Financeiro
-    U->>A: Bearer token do usuário
-    A->>A: valida e normaliza (Entra ID, User)
-    A->>A: cache por SHA-256(token) + escopos
-    alt sem token em cache
-        A->>E: jwt-bearer + requested_token_use=on_behalf_of<br/>(uma troca por usuário + escopos em andamento)
-        E-->>A: token para o Financeiro
-    end
-    A->>F: Bearer token OBO
-```
-
-- Exige `AddEntraIdClient` com credencial da app registration **da própria API** (`ManagedIdentityFederation`,
-  `WorkloadIdentity`, `Certificate` ou `ClientSecret`).
-- Só dentro de uma requisição autenticada por um esquema Entra ID com token **de usuário** (tokens de aplicação não têm OBO).
-- O token é pedido no tenant do usuário (`tid`): funciona em APIs multi-tenant.
-- **Uma troca por usuário + escopos em andamento** (`SingleFlight` do TEC.Core): requisições simultâneas do mesmo usuário
-  aguardam a mesma troca, sem rajada no Entra ID.
-- Cache privado (até 10 mil entradas) até 5 minutos antes da expiração. O token recebido nunca vai em claro para log nem
-  para a chave do cache.
-- Na app registration da API: *API permissions* → permissão **delegada** da API de destino + consentimento.
+- O token é obtido uma vez por *client id* + escopos e reaproveitado até perto da expiração; chamadas simultâneas disparam uma
+  única obtenção (uma trava por conjunto de escopos).
+- A renovação começa `min(5 minutos, 1/4 da validade)` antes de expirar: tokens curtos (ex.: 5 minutos) também são reaproveitados.
+- Um header `Authorization` já presente na requisição é mantido (o handler não sobrescreve nem consulta o provedor).
+- Falha na obtenção chega como exceção do provedor (ver [Erros](#-erros)); o provedor OpenID Connect **não** mantém o token
+  vencido nem usa o token atual quando a renovação falha.
 
 ### Token direto, sem HttpClient
 
@@ -136,7 +106,7 @@ public sealed class Exportador(IAccessTokenProvider tokens)
 {
     public async Task<string> TokenAsync(CancellationToken cancellationToken)
     {
-        AccessToken token = await tokens.GetTokenAsync(["api://<client-id-do-destino>/.default"], cancellationToken);
+        AccessToken token = await tokens.GetTokenAsync(["estoque.consultar"], cancellationToken);
         return token.Token;   // ToString() do AccessToken mascara o valor; nunca registre token.Token
     }
 }
@@ -144,8 +114,8 @@ public sealed class Exportador(IAccessTokenProvider tokens)
 
 ### Provedor de token próprio
 
-Para outro IdP, herde `CachingAccessTokenProvider` (cache, renovação, uma obtenção por conjunto de escopos, métricas e log
-sem o token já vêm prontos) e use o `AccessTokenHandler` genérico:
+Para outro IdP, herde `CachingAccessTokenProvider` (cache, renovação, uma obtenção por conjunto de escopos, métricas, log sem o
+token e fallback para o token atual já vêm prontos) e use o `AccessTokenHandler` genérico:
 
 ```csharp
 using Microsoft.Extensions.Logging;
@@ -177,44 +147,35 @@ builder.Services.AddHttpClient("relatorios", c => c.BaseAddress = new Uri("https
     });
 ```
 
-### Resiliência: retentativa e circuit breaker
+Com a base `CachingAccessTokenProvider`, se a renovação falhar e o token atual ainda valer mais de **30 segundos**, ele continua
+em uso (log 3122): uma instabilidade passageira do IdP não derruba as chamadas. Sem token utilizável, a falha vira
+`SecurityTokenAcquisitionException` (log 3120).
 
-Ligados por padrão em `AddEntraIdClient` (`EntraIdClientOptions.Resilience`, configuração `EntraId:Client:Resilience`):
+### Resiliência: circuit breaker
 
-- **On-Behalf-Of:** falha de rede, tempo limite, HTTP 408, 429 e 5xx são repetidos até `MaxRetries` vezes (padrão 2), com
-  backoff exponencial e jitter, respeitando `Retry-After` até `MaxRetryDelay` (padrão 10 s; acima disso desiste na hora).
-  Erros OAuth (`invalid_grant`, `interaction_required`, `invalid_client`...) **nunca** são repetidos.
-- **Client credentials:** a retentativa é a do Azure.Identity.
-- **Circuit breaker** (`Polly.Core`), um para cada fluxo (`EntraId` e `EntraId.OnBehalfOf`), por fora das retentativas. Com
-  falhas demais na janela, abre: as chamadas seguintes lançam `SecurityTokenAcquisitionException` na hora, com
-  `SecurityCircuitOpenException` em `InnerException`, sem chegar ao Entra ID. No On-Behalf-Of só contam as falhas
-  transitórias acima: o `invalid_grant` de um usuário não derruba os outros. O token da aplicação ainda válido continua em uso
-  com o circuito aberto (log 3122).
-- Na chamada de teste (meia-abertura), cancelamento conta como falha: o circuito só fecha com resposta do Entra ID.
-- A client assertion é gerada **a cada tentativa** (novo `jti`): uma retentativa nunca reenvia a mesma assertion.
+O `OpenIdConnectAccessTokenProvider` cria um `SecurityCircuitBreaker` (`Polly.Core`, nome `OpenIdConnect.M2M` nas métricas e
+logs) em volta do pedido ao endpoint de token, ligado por padrão (`OpenIdConnectClientOptions.Resilience`):
+
+- Com falhas demais na janela, o circuito abre: as chamadas seguintes lançam `SecurityCircuitOpenException` na hora, sem
+  chegar ao IdP, até o fim da pausa; depois uma chamada de teste (meia-abertura) fecha o circuito se funcionar.
+- Cancelamento pedido pelo chamador não abre o circuito; na chamada de teste conta como falha. Tempo limite do pedido
+  (`Timeout`, 10 s) é falha do destino.
+- Não há retentativa no provedor OpenID Connect: uma falha é lançada uma vez; o que repete é a aplicação.
 
 ```json
-{
-  "EntraId": {
-    "Client": {
-      "Resilience": {
-        "MaxRetries": 2,
-        "MaxRetryDelay": "00:00:10",
-        "AttemptTimeout": "00:00:10",
-        "TotalTimeout": "00:00:30",
-        "CircuitBreaker": { "FailureRatio": 0.5, "MinimumThroughput": 10, "SamplingDuration": "00:00:30", "BreakDuration": "00:00:30" }
-      }
-    }
-  }
-}
+{ "Resilience": { "Enabled": true, "FailureRatio": 0.5, "MinimumThroughput": 10, "SamplingDuration": "00:00:30", "BreakDuration": "00:00:30" } }
 ```
 
-Num provedor de token próprio, passe um `SecurityCircuitBreaker` ao construtor de `CachingAccessTokenProvider`.
+(`OpenIdConnectClientOptions` é configurado em código: `options.Resilience.BreakDuration = TimeSpan.FromSeconds(60)`.)
+
+Num provedor de token próprio, passe um `SecurityCircuitBreaker` ao construtor de `CachingAccessTokenProvider`: aberto, a
+renovação falha na hora e a regra do token atual continua valendo, e a exceção chega como `SecurityTokenAcquisitionException`
+com `SecurityCircuitOpenException` em `InnerException`.
 
 ### Tratar a falha do provedor
 
-`SecurityTokenAcquisitionException` deriva de `AppException` do TEC.Core (código `SEGURANCA_PROVEDOR_INDISPONIVEL`, HTTP
-502, mensagem genérica). Converta em `Result` com `ToResult()`:
+`SecurityTokenAcquisitionException` (provedores baseados em `CachingAccessTokenProvider`) deriva de `AppException` do TEC.Core
+(código `SEGURANCA_PROVEDOR_INDISPONIVEL`, HTTP 502, mensagem genérica). Converta em `Result` com `ToResult()`:
 
 ```csharp
 using TEC.Core.Common.Results;
@@ -235,21 +196,24 @@ public async Task<Result> SincronizarAsync(CancellationToken cancellationToken)
 ```
 
 Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de exceções converte qualquer `AppException` em
-`Result` (e o TEC.Cqrs.AspNetCore responde 502 padronizado).
+`Result` (e o TEC.Cqrs.AspNetCore responde 502 padronizado). O provedor OpenID Connect lança `InvalidOperationException` e
+`SecurityCircuitOpenException` direto: capture-as se quiser o mesmo tratamento.
 
 ---
 
 ## ⚙️ Opções
 
-**`EntraIdClientOptions`** (`AddEntraIdClient`)
+**`OpenIdConnectClientOptions`** (`AddOpenIdConnectClient`, só em código)
 
 | Opção | Padrão | Descrição |
 |---|---|---|
-| `Instance` | `https://login.microsoftonline.com/` | Nuvem oficial (mesmas regras do [provedor](provedor-entra-id.md#️-opções)) |
-| `TenantId` | `null` | Tenant da aplicação (GUID). Obrigatório, exceto com `ManagedIdentity` e `Developer` |
-| `ClientId` | `null` | Client id da app registration (GUID). Obrigatório, exceto com `ManagedIdentity` e `Developer` |
-| `Credential` | `ManagedIdentityFederation` | `EntraIdCredentialOptions` |
-| `Resilience` | ligado | `EntraIdResilienceOptions`: `MaxRetries` (0 a 5, padrão 2), `MaxRetryDelay` (0 a 60 s, padrão 10 s), `AttemptTimeout` (1 a 60 s, padrão 10 s), `TotalTimeout` (de `AttemptTimeout` a 120 s, padrão 30 s: tentativas + esperas do On-Behalf-Of) e `CircuitBreaker` (abaixo) |
+| `Authority` | vazio | Base para inferir o endpoint de token (`{Authority}/protocol/openid-connect/token`) |
+| `TokenEndpoint` | `null` | Endpoint de token direto; informe `TokenEndpoint` ou `Authority` |
+| `ClientId` | — (obrigatório) | Client id da aplicação |
+| `ClientSecretName` / `ClientSecret` | `null` | Segredo no TEC.Vault (preferido) ou direto; um dos dois é obrigatório |
+| `Timeout` | 10 s | Tempo limite do pedido ao endpoint de token |
+| `Resilience` | ligado | `SecurityCircuitBreakerOptions` (abaixo) |
+| `AuthType`, `CertificateName` | `ClientSecret`, `null` | Sem efeito: `PrivateKeyJwt` não está implementado |
 
 **`SecurityCircuitBreakerOptions`** (`TEC.Security.Resilience`)
 
@@ -266,9 +230,9 @@ Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de 
 | Opção | Padrão | Descrição |
 |---|---|---|
 | `Scopes` | vazio | Escopos pedidos (ex.: `api://<client-id>/.default`). Obrigatório |
-| `AllowedHosts` | vazio | Hosts que podem receber o token (comparação exata do host IDN, sem diferenciar maiúsculas). Obrigatório |
+| `AllowedHosts` | vazio | Hosts que podem receber o token (host IDN, sem diferenciar maiúsculas). Entrada sem porta vale só para a porta padrão (443 em HTTPS, 80 em HTTP); `host:porta` vale só para aquela porta (SEC-14). Obrigatório |
 | `AllowHttpForLoopback` | `false` | Aceita HTTP para `localhost`/loopback (desenvolvimento) |
-| `IsAllowedDestination(Uri?)` | — | `true` se o token pode ir para o destino: absoluto, sem usuário na URL, HTTPS (ou loopback permitido) e host na lista |
+| `IsAllowedDestination(Uri?)` | — | `true` se o token pode ir para o destino: absoluto, sem usuário na URL, HTTPS (ou loopback permitido) e host (e porta) na lista |
 | `Validate()` | — | Confere escopos e hosts (chamado no registro) |
 
 **`CachingAccessTokenProvider`** (base abstrata, `IAccessTokenProvider`, `IDisposable`)
@@ -276,17 +240,17 @@ Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de 
 | Membro | Valor | Descrição |
 |---|---|---|
 | `RefreshBefore` | 5 minutos | Antecedência máxima da renovação; tokens curtos usam um quarto da validade (`RefreshMargin`) |
-| Tempo limite do provedor | — | `OperationCanceledException` sem cancelamento do chamador (tempo limite do `HttpClient`/Azure.Core) é falha: usa o token atual ainda válido, vira `SecurityTokenAcquisitionException` e conta para o circuit breaker |
+| Tempo limite do provedor | — | `OperationCanceledException` sem cancelamento do chamador (tempo limite do `HttpClient`) é falha: usa o token atual ainda válido, vira `SecurityTokenAcquisitionException` e conta para o circuit breaker |
 | `MinimumRemainingLifetime` | 30 segundos | Validade restante mínima para continuar usando o token atual se a renovação falhar |
 | `MaxScopeSets` | 1024 | Conjuntos de escopos distintos em cache |
 | `ProviderName` | (construtor) | Nome nas métricas e logs |
-| `circuitBreaker` | (construtor, opcional) | `SecurityCircuitBreaker` em volta de `AcquireTokenAsync`; aberto, a renovação falha na hora e a regra do token atual continua valendo |
+| `circuitBreaker` | (construtor, opcional) | `SecurityCircuitBreaker` em volta de `AcquireTokenAsync` |
 | `AcquireTokenAsync(scopes, ct)` | abstrato | Obtém um token novo, sem cache |
 
 **Outros tipos:** `IAccessTokenProvider.GetTokenAsync(IReadOnlyList<string> scopes, CancellationToken)` →
 `ValueTask<AccessToken>`; `AccessToken(string token, DateTimeOffset expiresOn)` com `Token`, `ExpiresOn` e `ToString()`
 mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, ILogger<AccessTokenHandler>?)`;
-`EntraIdAccessTokenProvider` (registrado por `AddEntraIdClient`).
+`OpenIdConnectAccessTokenProvider` (cache por *client id* + escopos, circuit breaker, métricas `OpenIdConnect.M2M`).
 
 ---
 
@@ -294,16 +258,16 @@ mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, 
 
 | Erro | Quando ocorre | O que fazer |
 |---|---|---|
-| `InvalidOperationException` (registro) | `AddEntraIdClient` duas vezes; `Instance` não oficial; credencial inválida (ver [provedor](provedor-entra-id.md#-erros)) | Corrija as opções |
 | `InvalidOperationException` (registro) | `AccessTokenHandlerOptions` sem escopo ou sem host válido | Informe `Scopes` e `AllowedHosts` |
-| `InvalidOperationException` (criação do handler OBO) | Credencial de `AddEntraIdClient` sem autenticação de cliente (`ManagedIdentity`, `Developer`) ou sem `ClientId` | Use credencial da app registration |
-| `HttpRequestException` + log 3121 | Destino fora de `AllowedHosts`, sem HTTPS ou com usuário na URL | Inclua o host exato; `AllowHttpForLoopback` só em desenvolvimento |
-| `HttpRequestException` (OBO) | Fora de requisição HTTP; usuário não autenticado por token Entra ID; token de aplicação | OBO só serve para usuários Entra ID |
-| `SecurityTokenAcquisitionException` + log 3120 | O provedor falhou e não há token ainda válido (mais de 30 s) em cache | Veja o tipo no log; confira credencial, consentimento e acesso ao cofre |
-| `SecurityTokenAcquisitionException` + log 3401 (OBO) | O Entra ID recusou a troca (log com a exceção e o tipo; a mensagem traz só o código OAuth validado, ex.: `invalid_grant`), resposta acima de 64 KB, sem `access_token`, ou `expires_in` fora de 1 s a 24 h | Confira a permissão delegada e o consentimento |
-| `InvalidOperationException`: `Mais de 1024 conjuntos de escopos distintos` | Escopos montados dinamicamente | Use conjuntos fixos (ex.: `api://<id>/.default`) |
-| `ObjectDisposedException` | `GetTokenAsync` depois do `Dispose` do provedor | Não use o provedor depois de descartado |
-| `ArgumentException` | `GetTokenAsync` sem escopo ou com escopo vazio | Informe escopos válidos |
+| `InvalidOperationException` (resolução) | `Unable to resolve service for type 'OpenIdConnectClientOptions'` ao resolver `IAccessTokenProvider` | Registre o `IAccessTokenProvider` à mão (acima) |
+| `InvalidOperationException` (primeira obtenção) | Sem `ClientId`; sem `TokenEndpoint` nem `Authority`; sem `ClientSecret`/`ClientSecretName`; `ISecretReader` não registrado; segredo não encontrado no cofre | Configure o cliente e o TEC.Vault |
+| `InvalidOperationException`: `Falha ao obter token M2M ... HTTP <status>: <corpo>` | O endpoint de token recusou o pedido, ou a resposta não trouxe `access_token` | Leia o código OAuth no corpo (ex.: `invalid_client`); não registre a mensagem em log aberto |
+| `SecurityCircuitOpenException` | Circuito aberto após falhas repetidas do endpoint de token | Aguarde a pausa; veja os logs 3123–3125 |
+| `HttpRequestException` + log 3121 | Destino fora de `AllowedHosts`, sem HTTPS, com usuário na URL ou em porta não autorizada | Inclua o host (e a porta, se não for a padrão); `AllowHttpForLoopback` só em desenvolvimento |
+| `SecurityTokenAcquisitionException` + log 3120 | Provedor baseado em `CachingAccessTokenProvider` falhou e não há token ainda válido (mais de 30 s) | Veja o tipo no log; confira credencial e acesso ao cofre |
+| `InvalidOperationException`: `Mais de 1024 conjuntos de escopos distintos` | Escopos montados dinamicamente (`CachingAccessTokenProvider`) | Use conjuntos fixos |
+| `ObjectDisposedException` | `GetTokenAsync` depois do `Dispose` de um `CachingAccessTokenProvider` | Não use o provedor depois de descartado |
+| `ArgumentException` | `GetTokenAsync` sem escopo ou com escopo vazio (`CachingAccessTokenProvider`) | Informe escopos válidos |
 
 ---
 
@@ -315,11 +279,11 @@ mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, 
 
 - Redirecionamentos: o `HttpClientHandler` remove o `Authorization` ao seguir um redirect, então o token não acompanha um
   302 para outro domínio.
-- A resposta do endpoint de token é lida com teto de 64 KB mesmo sem `Content-Length`; o corpo de erro nunca vai para log
-  nem para a exceção (só o código OAuth validado, ou `codigo-invalido`).
-- A validade do token OBO usa o `TimeProvider` injetado e recusa `expires_in` absurdo (fora de 1 s a 24 h).
-- Prefira `ManagedIdentityFederation`/`WorkloadIdentity`; `Certificate` assina no cofre (chave não exportável);
-  `ClientSecret` só como último recurso.
+- Portas: `api.contoso.com` na lista libera só a 443; `api.contoso.com:8443` libera só a 8443.
+- A mensagem da exceção de falha do endpoint de token (provedor OpenID Connect) inclui o **corpo** da resposta do IdP: não a
+  registre nem a devolva ao cliente.
+- A resposta do endpoint de token do provedor OpenID Connect não tem teto de tamanho próprio além do tempo limite de 10 s.
+- Mantenha o segredo no TEC.Vault; `ClientSecret` na configuração só como último recurso.
 
 ---
 
@@ -328,7 +292,8 @@ mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, 
 <details>
 <summary>Qual escopo uso em client credentials?</summary>
 
-Sempre `api://<client-id-do-destino>/.default`: o token traz os app roles concedidos à sua aplicação na API de destino.
+O que o seu IdP definir para o serviço de destino. No Entra ID, sempre `api://<client-id-do-destino>/.default`: o token traz
+os app roles concedidos à sua aplicação na API de destino.
 
 </details>
 
@@ -340,10 +305,11 @@ Sim, com `AllowHttpForLoopback = true` e `localhost` em `AllowedHosts`. Nunca ha
 </details>
 
 <details>
-<summary>Como o destino diferencia OBO de client credentials?</summary>
+<summary>Como o destino vê a chamada?</summary>
 
-No OBO o destino recebe um token de **usuário** (com `scp`); em client credentials, um token de **aplicação** (só `roles`).
-No TEC.Security do destino, `Kind` é `User` ou `Application`.
+Como um token de aplicação do seu IdP. No TEC.Security do destino, o `Kind` é inferido pelo provedor OpenID Connect
+([🌐 Provedor OpenID Connect](provedor-openid-connect.md#mapeamento-de-claims)); confira o aviso sobre tokens de aplicação
+do Entra ID.
 
 </details>
 

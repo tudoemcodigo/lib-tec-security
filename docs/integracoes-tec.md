@@ -26,14 +26,14 @@
 ```mermaid
 flowchart BT
     Core["🧰 TEC.Core<br/><sub>ICurrentUser · Result · ApiResponse</sub>"]
-    Vault["🔐 TEC.Vault<br/><sub>certificado · chave · segredo</sub>"]
+    Vault["🔐 TEC.Vault<br/><sub>segredo do cliente</sub>"]
     Sec["🛡️ TEC.Security"]
     Cqrs["🧭 TEC.Cqrs"]
     Orm["🗄️ TEC.ORM"]
     Obs["📡 TEC.Observability"]
     Vault --> Core
     Sec --> Core
-    Sec -->|"só TEC.Security.EntraId"| Vault
+    Sec -->|"só TEC.Security.OpenIdConnect"| Vault
     Cqrs --> Core
     Orm --> Core
     Cqrs -.->|"HttpContext.User / IPrincipalAccessor"| Sec
@@ -45,8 +45,8 @@ flowchart BT
 
 | Componente | Relação | O que o TEC.Security usa ou oferece |
 |---|---|---|
-| [TEC.Core](https://github.com/tudoemcodigo/lib-tec-core) | Dependência (`TEC.Security`) | `ICurrentUser`/`PrincipalKind`, `Result`/`Error`, `AppException`, `ApiResponse`, `SingleFlight`, `Base64UrlEncoder`, `BoundedFileReader`, `SensitiveDataMasker` |
-| [TEC.Vault](https://github.com/tudoemcodigo/lib-tec-vault) | Dependência (só `TEC.Security.EntraId`) | Certificado e client secret da aplicação; assinatura da client assertion no cofre |
+| [TEC.Core](https://github.com/tudoemcodigo/lib-tec-core) | Dependência (`TEC.Security`) | `ICurrentUser`/`PrincipalKind`, `Result`/`Error`, `AppException`, `ApiResponse`, `SingleFlight`, `Base64UrlEncoder`, `SensitiveDataMasker`, `JsonDefaults` |
+| [TEC.Vault](https://github.com/tudoemcodigo/lib-tec-vault) | Dependência (só `TEC.Security.OpenIdConnect`) | Client secret da aplicação (`ISecretReader`) no login web e nas chamadas entre serviços |
 | [TEC.Cqrs](https://github.com/tudoemcodigo/lib-tec-cqrs) | Integração sem dependência | Identidade normalizada para `[AuthorizeRequest]` e `IPrincipalAccessor` |
 | [TEC.ORM](https://github.com/tudoemcodigo/lib-tec-orm) | Integração sem dependência | Lê o `ICurrentUser` registrado pelo TEC.Security para a auditoria |
 | [TEC.Observability](https://github.com/tudoemcodigo/lib-tec-observability) | Integração sem dependência | Exporta o Meter e o ActivitySource `TEC.Security` |
@@ -65,24 +65,23 @@ Cqrs, Security e Observability são independentes entre si: nenhum referencia o 
 | `Result`/`Error` | Retorno de `SecurityIdentityFactory` e `ISecurityContext`, com os códigos de [`SecurityErrors`](erros.md) |
 | `ApiResponse`, `ApiError`, `ApiResponse.DefaultMessages` | Corpo e textos das respostas 401/403 (mesmo formato do TEC.Cqrs.AspNetCore) e mensagem do erro de provedor |
 | `AppException` | Base da `SecurityTokenAcquisitionException` (`ToResult()`, `Errors`, `Code`) |
-| `SingleFlight<TKey, TValue>` | Uma consulta por chave no cache de permissões e uma troca On-Behalf-Of por usuário + escopos |
-| `Base64UrlEncoder` | Segredo e hash das API keys (estrito e canônico), client assertion, chave do cache |
-| `BoundedFileReader` | Leitura do token federado (`AZURE_FEDERATED_TOKEN_FILE`) com teto de 16 KB |
+| `SingleFlight<TKey, TValue>` | Uma consulta por chave no cache de permissões |
+| `Base64UrlEncoder` | Segredo e hash das API keys (estrito e canônico) e chave do cache de permissões |
 | `SensitiveDataMasker.DescribeUntrusted` | Caminho da requisição na auditoria quando não há endpoint (só tamanho + HMAC) |
 | `JsonDefaults` | Serialização do corpo 401/403 com metadados gerados (AOT) |
 
 ### TEC.Vault
 
-Credenciais da aplicação no Entra ID sem segredo na configuração:
+O segredo do cliente OAuth fica no cofre, e só o **nome** vai para o código ou a configuração:
 
-| Credencial | Interface do cofre | O que sai do cofre |
+| Onde | Opção | O que sai do cofre |
 |---|---|---|
-| `Certificate` | `ICertificateReader` + `IKeyCryptography` | Só a parte pública do certificado (relida a cada 30 min) e a **assinatura** PS256 da client assertion; a chave privada fica no cofre |
-| `ClientSecret` | `ISecretReader` | O segredo, relido a cada 30 min (acompanha a rotação), uma leitura por vez |
+| Chamadas entre serviços | `OpenIdConnectClientOptions.ClientSecretName` | O segredo (`ISecretReader.GetSecretAsync`), lido a cada obtenção de token |
+| Login web | `OpenIdConnectWebLoginOptions.ClientSecretName` | O segredo, lido uma vez na criação das opções do esquema (na subida) |
 
 ```csharp
 using TEC.Security.DependencyInjection;
-using TEC.Security.EntraId;
+using TEC.Security.OpenIdConnect;
 using TEC.Vault.AzureKeyVault;
 using TEC.Vault.DependencyInjection;
 
@@ -90,11 +89,17 @@ builder.Services.AddTecVault(vault => vault.UseAzureKeyVault(o =>
     o.VaultUri = new Uri("https://<nome-do-cofre>.vault.azure.net/")));
 
 builder.Services.AddTecSecurity(builder.Configuration, security => security
-    .AddEntraIdClient(builder.Configuration.GetSection("Security:EntraId:Client")));   // Credential:Type = Certificate
+    .AddAspNetCore()
+    .AddOpenIdConnectWebLogin("Web", o =>
+    {
+        o.Authority = "https://auth.empresa.com/realms/corporativo";
+        o.ClientId = "portal-web";
+        o.ClientSecretName = "portal-web-secret";
+    }));
 ```
 
-Papéis no cofre: *Key Vault Crypto User* + *Key Vault Certificate User* (`Certificate`) ou *Key Vault Secrets User*
-(`ClientSecret`).
+Papel mínimo no Azure Key Vault: *Key Vault Secrets User*. A credencial por certificado (client assertion assinada no cofre) não
+está implementada.
 
 ### TEC.Cqrs
 
@@ -105,17 +110,17 @@ Papéis no cofre: *Key Vault Crypto User* + *Key Vault Certificate User* (`Certi
   `IRequestAuthorizer<T>` com `ISecurityUser.HasPermission(...)`.
 - Workers (inclusive `BackgroundService` dentro da API): registre um `IPrincipalAccessor` sobre o `ISecurityUser`
   ([🤖 Workers](workers.md#teccqrs-fora-do-http)).
-- `SecurityTokenAcquisitionException` é uma `AppException`: o TEC.Cqrs a converte em `Result` (502).
+- `SecurityTokenAcquisitionException` (provedores baseados em `CachingAccessTokenProvider`) é uma `AppException`: o TEC.Cqrs a converte em `Result` (502).
 
 ### TEC.ORM
 
 O TEC.ORM **não** referencia o TEC.Security: consome o `ICurrentUser` do TEC.Core, que o TEC.Security registra. Assim o
-ORM continua sem ASP.NET Core e sem Entra ID, funciona em workers (identidade de sistema) e em testes (um `ICurrentUser`
+ORM continua sem ASP.NET Core e sem provedor de identidade, funciona em workers (identidade de sistema) e em testes (um `ICurrentUser`
 falso).
 
 | Campo de `IAuditable` | Valor |
 |---|---|
-| `CreatedBy` / `UpdatedBy` / `DeletedBy` | `ICurrentUser.Id` (`oid`, `apikey:{id}`, `system:{nome}`), nunca nome ou e-mail |
+| `CreatedBy` / `UpdatedBy` / `DeletedBy` | `ICurrentUser.Id` (`sub`, `apikey:{id}`, `system:{nome}`), nunca nome ou e-mail |
 | `CreatedByTenant` / `UpdatedByTenant` / `DeletedByTenant` | `ICurrentUser.TenantId` no momento da operação |
 
 Sem identidade autenticada, a gravação de entidade auditada é recusada (`ORM_AUDITORIA_SEM_IDENTIDADE`). Referência:
@@ -134,7 +139,7 @@ valores da query string nos traces, mas confira os logs de acesso de proxies e d
 | Integração | Configuração |
 |---|---|
 | TEC.Core | Nenhuma (dependência direta) |
-| TEC.Vault | `AddTecVault(...)` com um provedor de certificados/chaves (`Certificate`) ou segredos (`ClientSecret`); `Credential:CertificateName`/`ClientSecretName` |
+| TEC.Vault | `AddTecVault(...)` com um provedor de segredos; `ClientSecretName` nas opções do login web e do cliente OpenID Connect |
 | TEC.Cqrs | `IPrincipalAccessor` em workers; policies por permissão |
 | TEC.ORM | Nenhuma: o `ICurrentUser` já está registrado |
 | TEC.Observability | Nenhuma; sem ele: `AddSource(SecurityDiagnostics.ActivitySourceName)` e `AddMeter(SecurityDiagnostics.MeterName)` |
@@ -145,13 +150,12 @@ valores da query string nos traces, mas confira os logs de acesso de proxies e d
 
 | Erro | Quando ocorre | O que fazer |
 |---|---|---|
-| `InvalidOperationException`: `Credencial Certificate exige o TEC.Vault com chaves/certificados` | `Certificate` sem `IKeyCryptography`/`ICertificateReader` registrados | Registre o TEC.Vault com o provedor do cofre |
-| `InvalidOperationException`: `Credencial ClientSecret exige o TEC.Vault com segredos` | `ClientSecret` sem `ISecretReader` | Registre o TEC.Vault |
-| `InvalidOperationException`: `... não encontrado no cofre (<código>)` / `O cofre recusou a assinatura` | Item inexistente, sem permissão ou desabilitado | Confira o nome e os papéis no cofre |
+| `InvalidOperationException`: `ClientSecretName informado, mas ISecretReader não foi injetado` | `ClientSecretName` sem o TEC.Vault registrado | Registre o TEC.Vault com o provedor do cofre |
+| `InvalidOperationException`: `Segredo '<nome>' não encontrado no cofre TEC.Vault` | Item inexistente, sem permissão ou desabilitado | Confira o nome e os papéis no cofre |
 | 401 em `Send` do TEC.Cqrs num worker | `IPrincipalAccessor` lendo só o `HttpContext` | Veja [🤖 Workers](workers.md#teccqrs-fora-do-http) |
 | `ORM_AUDITORIA_SEM_IDENTIDADE` | Gravação auditada sem identidade (ex.: job sem `RunAs`) | Use uma identidade de sistema |
 
-Nas chamadas de serviço, as falhas de credencial chegam como `SecurityTokenAcquisitionException`
+Nas chamadas de serviço, as falhas de credencial chegam como `InvalidOperationException` do provedor OpenID Connect
 ([🔁 Chamadas entre serviços](chamadas-entre-servicos.md#-erros)).
 
 ---
@@ -162,7 +166,7 @@ Nas chamadas de serviço, as falhas de credencial chegam como `SecurityTokenAcqu
 > Os campos "por tenant" da auditoria do TEC.ORM são informativos: o ORM **não** filtra linhas por tenant. O isolamento
 > de dados entre tenants é responsabilidade da aplicação ([🏢 Tenants](tenants.md#️-segurança)).
 
-- Conceda à identidade da aplicação só os papéis mínimos no cofre (`Crypto User` + `Certificate User`, ou `Secrets User`).
+- Conceda à identidade da aplicação só o papel mínimo no cofre (*Secrets User*).
 - Traces e métricas do TEC.Security não levam token, id de usuário, nome nem e-mail: podem ir para terceiros.
 
 ---
@@ -172,8 +176,8 @@ Nas chamadas de serviço, as falhas de credencial chegam como `SecurityTokenAcqu
 <details>
 <summary>Preciso do TEC.Vault para usar o TEC.Security?</summary>
 
-Só o `TEC.Security.EntraId` depende dele, e só as credenciais `Certificate` e `ClientSecret` o usam em tempo de execução.
-`ManagedIdentityFederation`, `WorkloadIdentity`, `ManagedIdentity` e `Developer` não leem o cofre.
+Só o `TEC.Security.OpenIdConnect` depende dele, e só quando você usa `ClientSecretName`. O núcleo, o `TEC.Security.AspNetCore`
+e o `TEC.Security.Testing` não o usam.
 
 </details>
 

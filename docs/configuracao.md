@@ -28,10 +28,10 @@ flowchart LR
     A["AddTecSecurity(configuration, security => ...)"] --> CORE["Núcleo<br/>ISecurityUser · ICurrentUser · ICurrentTenant<br/>ISecurityContext · ITenantRegistry · IPermissionStore<br/>SecurityIdentityFactory · ApiKeyValidator"]
     A --> B["SecurityBuilder"]
     B --> ASP["AddAspNetCore()<br/>esquema TEC · FallbackPolicy · 401/403"]
-    ASP --> P1["AddEntraIdApi / AddEntraIdWebLogin"]
+    ASP --> P1["AddOpenIdConnectApi / AddOpenIdConnectWebLogin"]
     ASP --> P2["AddApiKeys()"]
     ASP --> P3["AddTestJwt() (testes)"]
-    B --> CLI["AddEntraIdClient()<br/>chamadas entre serviços"]
+    B --> CLI["AddOpenIdConnectClient()<br/>chamadas entre serviços"]
     B --> ST["UsePermissionStore&lt;T&gt;() · UseTenantRegistry&lt;T&gt;()"]
 ```
 
@@ -40,7 +40,7 @@ flowchart LR
 | `AddTecSecurity` | `TEC.Security` | Registra o núcleo e lê a seção `Security` (com recarga); devolve o `SecurityBuilder` |
 | `SecurityBuilder` | `TEC.Security` | Ponto de extensão: provedores, fonte de permissões e cadastro de tenants |
 | `AddAspNetCore` | `TEC.Security.AspNetCore` | Esquema padrão `TEC` (escolhe o provedor por requisição), `DefaultPolicy`/`FallbackPolicy` fechadas, `[TecAuthorize]`, respostas 401/403 padronizadas e conferência dos endpoints na subida |
-| `AddEntraIdApi`, `AddEntraIdWebLogin`, `AddEntraIdClient` | `TEC.Security.EntraId` | Provedor Microsoft Entra ID ([🪪 Provedor Entra ID](provedor-entra-id.md), [🔁 Chamadas entre serviços](chamadas-entre-servicos.md)) |
+| `AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`, `AddOpenIdConnectClient` | `TEC.Security.OpenIdConnect` | Provedor OpenID Connect, inclusive Microsoft Entra ID ([🌐 Provedor OpenID Connect](provedor-openid-connect.md), [🪪 Provedor Entra ID](provedor-entra-id.md), [🔁 Chamadas entre serviços](chamadas-entre-servicos.md)) |
 | `AddApiKeys` | `TEC.Security.AspNetCore` | Esquema de API key ([🔑 API keys](api-keys.md)) |
 
 O que `AddTecSecurity` registra:
@@ -66,13 +66,13 @@ using TEC.Security.Abstractions;
 using TEC.Security.AspNetCore;
 using TEC.Security.AspNetCore.Authorization;
 using TEC.Security.DependencyInjection;
-using TEC.Security.EntraId;
+using TEC.Security.OpenIdConnect;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddTecSecurity(builder.Configuration, security => security
     .AddAspNetCore(o => o.HubPaths.Add("/hubs/chat"))   // opções de SecurityAspNetCoreOptions
-    .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api"))
+    .AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api"))
     .AddApiKeys());
 
 var app = builder.Build();
@@ -87,28 +87,36 @@ app.Run();
 ```
 
 > [!IMPORTANT]
-> `AddAspNetCore()` vem **antes** de qualquer provedor ASP.NET Core (`AddEntraIdApi`, `AddEntraIdWebLogin`, `AddApiKeys`,
+> `AddAspNetCore()` vem **antes** de qualquer provedor ASP.NET Core (`AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`, `AddApiKeys`,
 > `AddTestJwt`); sem ele, o provedor lança `InvalidOperationException` no registro.
 
 ### Worker sem ASP.NET Core
 
 ```csharp
+using TEC.Security.Abstractions;
 using TEC.Security.DependencyInjection;
-using TEC.Security.EntraId;
+using TEC.Security.OpenIdConnect;
 
 builder.Services.AddTecSecurity(builder.Configuration, security => security
-    .AddEntraIdClient(builder.Configuration.GetSection("Security:EntraId:Client")));   // opcional: chamar outras APIs
+    .AddOpenIdConnectClient(o =>                                   // opcional: chamar outras APIs
+    {
+        o.Authority = "https://auth.empresa.com/realms/corp";
+        o.ClientId = "servico-faturamento";
+        o.ClientSecretName = "segredo-faturamento";                // lido do TEC.Vault
+    }));
+builder.Services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<OpenIdConnectAccessTokenProvider>());   // veja o aviso em Chamadas entre serviços
 ```
 
 Só o pacote `TEC.Security` é necessário para usar `ISecurityContext`, `ISecurityUser` e o cadastro de tenants. O
-`TEC.Security.EntraId` (que traz o ASP.NET Core) só entra se o worker chamar serviços com token do Entra ID.
+`TEC.Security.OpenIdConnect` (que traz o ASP.NET Core) só entra se o worker chamar serviços com token de client credentials
+([🔁 Chamadas entre serviços](chamadas-entre-servicos.md)).
 
 ### Fontes próprias de permissões e tenants
 
 ```csharp
 builder.Services.AddTecSecurity(builder.Configuration, security => security
     .AddAspNetCore()
-    .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api"))
+    .AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api"))
     .UsePermissionStore<PermissoesDoBanco>(TimeSpan.FromMinutes(2))   // cache de 2 min (Zero desliga; máximo 1 h)
     .UseTenantRegistry<TenantsDoBanco>());                             // cadastro mantido em memória
 ```
@@ -119,7 +127,7 @@ e [🏢 Tenants](tenants.md#cadastro-em-outra-fonte).
 
 ### appsettings completo
 
-Nenhuma chave guarda segredo: certificado e client secret ficam no TEC.Vault (só o **nome** vai para a configuração) e a
+Nenhuma chave guarda segredo: o client secret fica no TEC.Vault (só o **nome** vai para o código ou a configuração) e a
 API key é guardada como hash.
 
 ```json
@@ -128,38 +136,21 @@ API key é guardada como hash.
     "RequireTenant": true,
     "RolesAsPermissions": false,
 
-    "EntraId": {
+    "OpenIdConnect": {
       "Api": {
-        "Instance": "https://login.microsoftonline.com/",
-        "TenantId": "<tenant-id>",
-        "ClientId": "<client-id-da-api>",
+        "Authority": "https://login.microsoftonline.com/<tenant-id>/v2.0",
+        "Audience": "<client-id-da-api>",
         "MultiTenant": true,
-        "AllowedTenantIds": [],
-        "Audiences": [],
-        "AllowedClientApplications": [ "<client-id-do-front>" ],
-        "AllowApplicationTokens": true,
-        "AcceptV1Tokens": false
-      },
-      "WebLogin": {
-        "TenantId": "<tenant-id>",
-        "ClientId": "<client-id-do-site>",
-        "CallbackPath": "/signin-oidc",
-        "SignedOutCallbackPath": "/signout-callback-oidc",
-        "SessionDuration": "01:00:00",
-        "RevalidationInterval": "00:05:00",
-        "MaxSessionLifetime": "08:00:00",
-        "Credential": { "Type": "ManagedIdentityFederation", "ManagedIdentityClientId": "<client-id-da-identidade-gerenciada>" }
-      },
-      "Client": {
-        "TenantId": "<tenant-id>",
-        "ClientId": "<client-id-da-api>",
-        "Credential": { "Type": "Certificate", "CertificateName": "<certificado-no-cofre>" }
+        "RequireHttpsMetadata": true,
+        "TenantClaim": null,
+        "RoleClaimType": "roles",
+        "NameClaimType": "preferred_username"
       }
     },
 
     "Tenants": {
-      "contoso":  { "Name": "Contoso Ltda", "Enabled": true,  "IdentityProviders": { "EntraId": [ "<tenant-id-da-contoso>" ] } },
-      "fabrikam": { "Name": "Fabrikam",     "Enabled": false, "IdentityProviders": { "EntraId": [ "<tenant-id-da-fabrikam>" ] } }
+      "contoso":  { "Name": "Contoso Ltda", "Enabled": true,  "IdentityProviders": { "OpenIdConnect": [ "<tenant-id-da-contoso>" ] } },
+      "fabrikam": { "Name": "Fabrikam",     "Enabled": false, "IdentityProviders": { "OpenIdConnect": [ "<tenant-id-da-fabrikam>" ] } }
     },
 
     "Permissions": {
@@ -191,16 +182,26 @@ API key é guardada como hash.
 ```csharp
 builder.Services.AddTecSecurity(builder.Configuration, security => security
     .AddAspNetCore()
-    .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api"))
-    .AddEntraIdWebLogin("Web", builder.Configuration.GetSection("Security:EntraId:WebLogin"))
-    .AddEntraIdClient(builder.Configuration.GetSection("Security:EntraId:Client"))
+    .AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api"))
+    .AddOpenIdConnectWebLogin("Web", o =>                       // só em código
+    {
+        o.Authority = "https://login.microsoftonline.com/<tenant-id>/v2.0";
+        o.ClientId = "<client-id-do-site>";
+        o.ClientSecretName = "<nome-do-segredo-no-cofre>";
+    })
+    .AddOpenIdConnectClient(o =>                                // só em código
+    {
+        o.TokenEndpoint = "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token";
+        o.ClientId = "<client-id-desta-aplicacao>";
+        o.ClientSecretName = "<nome-do-segredo-no-cofre>";
+    })
     .AddApiKeys());
 ```
 
 > [!NOTE]
-> As seções `Security:EntraId:*` são só uma sugestão de organização: cada `AddEntraId*` recebe a seção que você passar (a
-> constante `EntraIdExtensions.SectionName` vale `Security:EntraId`). `Security`, `Security:Tenants`,
-> `Security:Permissions` e `Security:ApiKeys` são fixas (constantes `SectionName` de cada classe de opções).
+> A seção `Security:OpenIdConnect:Api` é só uma sugestão de organização: `AddOpenIdConnectApi` recebe a seção que você
+> passar. O login web e o cliente de chamadas entre serviços são configurados em código (`Action<...Options>`). `Security`,
+> `Security:Tenants`, `Security:Permissions` e `Security:ApiKeys` são fixas (constantes `SectionName` de cada classe de opções).
 
 ### Recarga sem reinício
 
@@ -210,7 +211,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 | `Security:Tenants` | ✅ | Com erro: vale por entrada (log 3101); entradas com erro falham fechadas, desativações e remoções valem |
 | `Security:Permissions` | ✅ | — (papéis sem mapeamento não geram permissões) |
 | `Security:ApiKeys` (inclusive `HeaderName`) | ✅ | Com erro: vale por chave (log 3111 uma vez); chaves com erro recusadas, revogações valem; `HeaderName` inválido mantém o anterior. Releitura no máximo 1×/s |
-| `Security:EntraId:*` e opções em código | ❌ | Lidas no registro; inválidas impedem a subida |
+| Seção de `AddOpenIdConnectApi` e opções em código | ❌ | Lidas no registro; inválidas impedem a subida |
 
 > [!WARNING]
 > Com vários arquivos de configuração, listas JSON (`[...]`) são mescladas **por índice**. Mantenha o cadastro de tenants
@@ -258,7 +259,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 | Chave | Padrão | Descrição |
 |---|---|---|
 | `RequireTenant` | `false` | Toda identidade (exceto sistema) precisa de tenant cadastrado e ativo; sem tenant → 401 |
-| `RolesAsPermissions` | não definido (`bool?`) | Os próprios papéis contam como permissões (somados aos do `IPermissionStore`). Não definido: `true`, exceto com provedor multi-tenant (`AddEntraIdApi`/`AddEntraIdWebLogin` com `MultiTenant`), em que vale `false`. `true` explícito em multi-tenant gera o aviso 3403 |
+| `RolesAsPermissions` | não definido (`bool?`) | Os próprios papéis contam como permissões (somados aos do `IPermissionStore`). Não definido: `true` (o `SecurityIdentityFactory` usa `RolesAsPermissions ?? true`). Em APIs multi-tenant defina `false` explicitamente |
 
 As demais seções têm a página própria: `Security:Tenants` em [🏢 Tenants](tenants.md#️-opções), `Security:Permissions` em
 [👤 Identidade e permissões](identidade-e-permissoes.md#️-opções) e `Security:ApiKeys` em [🔑 API keys](api-keys.md#️-opções).
@@ -272,7 +273,7 @@ por um `IHostedService` na subida: o erro aparece na inicialização, não na pr
 
 | Exceção | Quando ocorre | O que fazer |
 |---|---|---|
-| `InvalidOperationException` | `AddTecSecurity`, `AddAspNetCore`, `AddApiKeys` ou `AddEntraIdClient` chamados duas vezes | Configure tudo numa única chamada |
+| `InvalidOperationException` | `AddTecSecurity`, `AddAspNetCore` ou `AddApiKeys` chamados duas vezes | Configure tudo numa única chamada |
 | `InvalidOperationException` | `UsePermissionStore` ou `UseTenantRegistry` chamados duas vezes | Registre uma única fonte de permissões e um único cadastro |
 | `ArgumentOutOfRangeException` | `UsePermissionStore` com cache fora de 0 a 1 hora | Ajuste a duração |
 | `InvalidOperationException` | Provedor ASP.NET Core sem `AddAspNetCore()` antes | Chame `AddAspNetCore()` primeiro |
@@ -297,7 +298,7 @@ Mensagens de erro nunca repetem segredos, hashes ou ids externos.
 - `ApiKeyRequiresHttps = false` só faz sentido atrás de um proxy que já exige HTTPS; prefira `UseForwardedHeaders`.
 - `HubPaths` aceita o token na query string, que costuma aparecer em logs de acesso: liste só os hubs reais e mascare
   `access_token` nos logs do proxy.
-- Em APIs multi-tenant use `RolesAsPermissions: false` e permissões por tenant ([🏢 Tenants](tenants.md#️-segurança)).
+- Em APIs multi-tenant defina `RolesAsPermissions: false` e use permissões por tenant ([🏢 Tenants](tenants.md#️-segurança)).
 
 ---
 
@@ -314,7 +315,7 @@ controlar a ordem (ex.: depois de `UseRouting`/`UseCors` personalizados).
 <details>
 <summary>Posso registrar duas APIs do Entra ID (app registrations diferentes)?</summary>
 
-Sim: chame `AddEntraIdApi` duas vezes com esquemas diferentes. O seletor escolhe pelo emissor e pela audiência do token
+Sim: chame `AddOpenIdConnectApi` duas vezes com esquemas diferentes. O seletor escolhe pelo emissor e pela audiência do token
 ([🪪 Provedor Entra ID](provedor-entra-id.md#várias-app-registrations)).
 
 </details>

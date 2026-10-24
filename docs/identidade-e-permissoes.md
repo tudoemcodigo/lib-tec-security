@@ -27,7 +27,7 @@
 
 ```mermaid
 flowchart LR
-    P["Provedor<br/>(token Entra ID, API key, teste)"] --> EI["ExternalIdentity<br/>formato neutro"]
+    P["Provedor<br/>(token OpenID Connect, API key, teste)"] --> EI["ExternalIdentity<br/>formato neutro"]
     EI --> F["SecurityIdentityFactory"]
     T[("ITenantRegistry")] -.-> F
     S[("IPermissionStore<br/>+ cache")] -.-> F
@@ -36,17 +36,17 @@ flowchart LR
 ```
 
 O código da aplicação lê **sempre** `ISecurityUser` (ou o `ICurrentUser` do TEC.Core), nunca os claims crus do token: o
-mesmo código funciona com Entra ID, API key, identidade de sistema ou um provedor futuro.
+mesmo código funciona com qualquer provedor OpenID Connect, API key, identidade de sistema ou um provedor futuro.
 
 ### Claims normalizados
 
 | Claim (`TecClaimTypes`) | Conteúdo | Propriedade |
 |---|---|---|
-| `tec_uid` (`UserId`) | Id estável: `oid` do Entra ID, `apikey:{id}`, `system:{nome}` | `Id` |
+| `tec_uid` (`UserId`) | Id estável: `sub` do token OpenID Connect, `apikey:{id}`, `system:{nome}` | `Id` |
 | `tec_kind` (`Kind`) | `User`, `Application` ou `System` | `Kind` |
 | `tec_tenant` (`TenantId`) | Tenant **da aplicação**, sempre do cadastro (nunca copiado do token) | `TenantId`, `ICurrentTenant.Id` |
 | `tec_ext_tenant` (`ExternalTenantId`) | Tenant no provedor (ex.: `tid`) | `ExternalTenantId` |
-| `tec_scheme` / `tec_provider` | Esquema (ex.: `Funcionarios`) e provedor (`EntraId`, `ApiKey`, `System`, `Test`) | `Scheme`, `Provider` |
+| `tec_scheme` / `tec_provider` | Esquema (ex.: `Funcionarios`) e provedor (`OpenIdConnect`, `ApiKey`, `System`, `Test`) | `Scheme`, `Provider` |
 | `tec_client` (`ClientId`) | Aplicação cliente que obteve o token | `ClientId` |
 | `tec_name` (`Name`) | Nome de exibição, saneado | `Name` |
 | `tec_role` / `tec_scope` / `tec_perm` | Um claim por papel, escopo e permissão | `Roles`, `Scopes`, `Permissions` |
@@ -96,7 +96,7 @@ using TEC.Security.Abstractions;
 
 app.MapGet("/eu", (ISecurityUser usuario) => new
 {
-    usuario.Id,              // "oid" do Entra ID, "apikey:erp-contoso" ou "system:fechamento"
+    usuario.Id,              // "sub" do token, "apikey:erp-contoso" ou "system:fechamento"
     usuario.Kind,            // PrincipalKind.User, Application ou System
     usuario.TenantId,        // tenant da aplicação (do cadastro)
     usuario.Name,            // só exibição
@@ -137,7 +137,7 @@ Padrão: `ConfigurationPermissionStore`, com recarga.
 |---|---|
 | `Permissions:Roles` | Identidades de qualquer tenant |
 | `Permissions:Tenants:{tenant}:Roles` | Somente identidades daquele tenant (somadas às de `Roles`); o id do tenant não diferencia maiúsculas e, se não existir no cadastro, a subida registra o aviso 3102 |
-| Papéis da própria identidade | Todos, se `RolesAsPermissions` for `true` (padrão quando não definido, exceto com provedor multi-tenant, em que o padrão é `false`) |
+| Papéis da própria identidade | Todos, se `RolesAsPermissions` for `true` (padrão quando não definido; em APIs multi-tenant defina `false`) |
 | `Permissions` da API key | A própria chave ([🔑 API keys](api-keys.md)) |
 
 Papéis sem mapeamento não geram permissões. Os nomes de papel são comparados exatamente (diferenciando maiúsculas).
@@ -161,7 +161,7 @@ internal sealed class PermissoesDoBanco(IServiceScopeFactory scopes) : IPermissi
 
 builder.Services.AddTecSecurity(builder.Configuration, security => security
     .AddAspNetCore()
-    .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api"))
+    .AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api"))
     .UsePermissionStore<PermissoesDoBanco>());   // cache padrão de 5 minutos
 ```
 
@@ -284,7 +284,7 @@ Para o cliente HTTP, todos viram **401** genérico; o detalhe fica só no log.
 
 > [!CAUTION]
 > Nunca use `Name`, e-mail ou `preferred_username` para decidir acesso ou como chave de auditoria: são mutáveis e
-> reaproveitáveis. Use `Id` (`oid`).
+> reaproveitáveis. Use `Id` (`sub`).
 
 > [!WARNING]
 > Uma revogação na sua fonte de permissões só vale depois do cache (padrão 5 minutos). Para revogação imediata, use
@@ -310,8 +310,9 @@ Papel é o que o provedor informa (ex.: app role `Gerente`); permissão é o que
 <details>
 <summary>Como leio um claim específico do provedor (ex.: <code>preferred_username</code>)?</summary>
 
-`usuario.Principal?.FindFirst("preferred_username")?.Value`. Só para exibição: decisões de acesso usam as propriedades
-normalizadas.
+`usuario.Principal?.FindFirst("preferred_username")?.Value`, desde que o provedor tenha copiado o claim para a identidade
+(`ExternalIdentity.SourceClaims`); o provedor OpenID Connect atual **não** copia os claims originais. Só para exibição:
+decisões de acesso usam as propriedades normalizadas.
 
 </details>
 

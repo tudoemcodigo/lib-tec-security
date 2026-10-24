@@ -25,6 +25,12 @@ internal static class OpenIdConnectIdentity
 
         foreach (var claim in claims)
         {
+            if (claim.Type == "iss")
+            {
+                issuer = claim.Value;
+                continue;
+            }
+
             issuer ??= claim.Issuer;
 
             if (claim.Type is "sub" or ClaimTypes.NameIdentifier)
@@ -39,16 +45,26 @@ internal static class OpenIdConnectIdentity
                 continue;
             }
 
-            if (options.TenantClaim is not null && claim.Type == options.TenantClaim)
+            if (options.TenantClaim is not null)
             {
-                externalTenant ??= claim.Value;
-                continue;
+                if (claim.Type == options.TenantClaim)
+                {
+                    if (externalTenant is not null && !string.Equals(externalTenant, claim.Value, StringComparison.Ordinal))
+                    {
+                        rejectionReason = $"claim de tenant '{options.TenantClaim}' com valores divergentes";
+                        return null;
+                    }
+                    externalTenant = claim.Value;
+                }
             }
-
-            if (claim.Type is "tid" or "tenant_id" or "tenant")
+            else if (claim.Type is "tid" or "tenant_id" or "tenant")
             {
-                externalTenant ??= claim.Value;
-                continue;
+                if (externalTenant is not null && !string.Equals(externalTenant, claim.Value, StringComparison.Ordinal))
+                {
+                    rejectionReason = "claims genéricos de tenant com valores divergentes";
+                    return null;
+                }
+                externalTenant = claim.Value;
             }
 
             if (claim.Type is "scope" or "scp")
@@ -58,16 +74,28 @@ internal static class OpenIdConnectIdentity
                 continue;
             }
 
-            if (claim.Type == options.RoleClaimType || claim.Type is "roles" or "role" or ClaimTypes.Role)
+            if (!string.IsNullOrWhiteSpace(options.RoleClaimType))
+            {
+                if (claim.Type == options.RoleClaimType)
+                {
+                    ExtractRoles(claim.Value, roles);
+                    continue;
+                }
+            }
+            else if (claim.Type is "roles" or "role" or ClaimTypes.Role)
             {
                 ExtractRoles(claim.Value, roles);
                 continue;
             }
 
             // Suporte nativo ao padrão Keycloak realm_access e resource_access
-            if (claim.Type is "realm_access" or "resource_access")
+            if (claim.Type == "realm_access")
             {
-                ExtractJsonRoles(claim.Value, roles);
+                ExtractRealmRoles(claim.Value, roles);
+            }
+            else if (claim.Type == "resource_access")
+            {
+                ExtractResourceAccessRoles(claim.Value, options.Audience, options.Audiences, roles);
             }
         }
 
@@ -78,6 +106,8 @@ internal static class OpenIdConnectIdentity
         }
 
         string? resolvedTenant = null;
+        string? tenantLookupKey = externalTenant ?? issuer;
+
         if (options.MultiTenant)
         {
             if (tenantRegistry is null)
@@ -86,8 +116,7 @@ internal static class OpenIdConnectIdentity
                 return null;
             }
 
-            string tenantLookupKey = externalTenant ?? issuer ?? string.Empty;
-            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey);
+            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey ?? string.Empty);
             if (tenantInfo is null || !tenantInfo.Enabled)
             {
                 rejectionReason = $"tenant '{tenantLookupKey}' não encontrado ou inativo no cadastro de tenants";
@@ -95,27 +124,58 @@ internal static class OpenIdConnectIdentity
             }
 
             resolvedTenant = tenantInfo.Id;
+            externalTenant ??= tenantLookupKey;
         }
-        else if (externalTenant is not null && tenantRegistry is not null)
+        else if (tenantRegistry is not null && tenantLookupKey is not null)
         {
-            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, externalTenant);
+            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey);
             if (tenantInfo is { Enabled: true })
+            {
                 resolvedTenant = tenantInfo.Id;
+                externalTenant ??= tenantLookupKey;
+            }
         }
 
-        var kind = (roles.Count == 0 && scopes.Count > 0 && !claims.Any(c => c.Type is "email" or "preferred_username"))
-            ? PrincipalKind.Application
-            : PrincipalKind.User;
+        bool isApplication = false;
+        string? gty = claims.FirstOrDefault(c => c.Type == "gty")?.Value;
+        string? idtyp = claims.FirstOrDefault(c => c.Type == "idtyp")?.Value;
+        string? azp = claims.FirstOrDefault(c => c.Type == "azp")?.Value;
+        string? clientIdClaim = claims.FirstOrDefault(c => c.Type is "client_id" or "clientId")?.Value;
+        string? prefUser = claims.FirstOrDefault(c => c.Type == "preferred_username")?.Value;
+
+        if (string.Equals(gty, "client-credentials", StringComparison.OrdinalIgnoreCase))
+        {
+            isApplication = true;
+        }
+        else if (string.Equals(idtyp, "app", StringComparison.OrdinalIgnoreCase))
+        {
+            isApplication = true;
+        }
+        else if (prefUser is not null && prefUser.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase))
+        {
+            isApplication = true;
+        }
+        else if (subject is not null && (
+            (azp is not null && string.Equals(subject, azp, StringComparison.OrdinalIgnoreCase)) ||
+            (clientIdClaim is not null && string.Equals(subject, clientIdClaim, StringComparison.OrdinalIgnoreCase))))
+        {
+            bool hasUserSignal = claims.Any(c => c.Type is "email" or "upn" or "sid" or "auth_time");
+            if (!hasUserSignal)
+                isApplication = true;
+        }
+
+        var kind = isApplication ? PrincipalKind.Application : PrincipalKind.User;
 
         return new ExternalIdentity
         {
             Scheme = scheme,
             Provider = ProviderName,
-            UserId = subject,
+            UserId = subject!,
             Kind = kind,
             ExternalTenantId = externalTenant,
             TenantId = resolvedTenant,
-            Name = displayName ?? subject,
+            MultiTenant = options.MultiTenant,
+            Name = displayName ?? subject!,
             Roles = [.. roles],
             Scopes = [.. scopes]
         };
@@ -150,12 +210,21 @@ internal static class OpenIdConnectIdentity
         target.Add(rawValue);
     }
 
-    private static void ExtractJsonRoles(string json, HashSet<string> target)
+    private static void ExtractRealmRoles(string json, HashSet<string> target)
     {
         try
         {
             using var doc = JsonDocument.Parse(json);
-            FindRolesInElement(doc.RootElement, target);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("roles", out var rolesElem) &&
+                rolesElem.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var role in rolesElem.EnumerateArray())
+                {
+                    if (role.ValueKind == JsonValueKind.String && role.GetString() is { } r && !string.IsNullOrWhiteSpace(r))
+                        target.Add(r);
+                }
+            }
         }
         catch (JsonException)
         {
@@ -163,32 +232,47 @@ internal static class OpenIdConnectIdentity
         }
     }
 
-    private static void FindRolesInElement(JsonElement element, HashSet<string> target)
+    private static void ExtractResourceAccessRoles(string json, string? primaryAudience, IReadOnlyCollection<string>? allowedAudiences, HashSet<string> target)
     {
-        if (element.ValueKind == JsonValueKind.Object)
+        try
         {
-            if (element.TryGetProperty("roles", out var rolesElement) && rolesElement.ValueKind == JsonValueKind.Array)
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return;
+
+            var targetClients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(primaryAudience))
+                targetClients.Add(primaryAudience);
+            if (allowedAudiences is not null)
             {
-                foreach (var role in rolesElement.EnumerateArray())
+                foreach (var aud in allowedAudiences)
                 {
-                    if (role.ValueKind == JsonValueKind.String && role.GetString() is { } r && !string.IsNullOrWhiteSpace(r))
-                        target.Add(r);
+                    if (!string.IsNullOrWhiteSpace(aud))
+                        targetClients.Add(aud);
                 }
             }
 
-            foreach (var property in element.EnumerateObject())
+            foreach (var clientProp in doc.RootElement.EnumerateObject())
             {
-                if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
-                    FindRolesInElement(property.Value, target);
+                // Isola os papéis estritamente aos clientes autorizados desta API
+                if (targetClients.Count > 0 && !targetClients.Contains(clientProp.Name))
+                    continue;
+
+                if (clientProp.Value.ValueKind == JsonValueKind.Object &&
+                    clientProp.Value.TryGetProperty("roles", out var rolesElem) &&
+                    rolesElem.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var role in rolesElem.EnumerateArray())
+                    {
+                        if (role.ValueKind == JsonValueKind.String && role.GetString() is { } r && !string.IsNullOrWhiteSpace(r))
+                            target.Add(r);
+                    }
+                }
             }
         }
-        else if (element.ValueKind == JsonValueKind.Array)
+        catch (JsonException)
         {
-            foreach (var item in element.EnumerateArray())
-            {
-                if (item.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
-                    FindRolesInElement(item, target);
-            }
+            // Ignora JSON malformado
         }
     }
 }

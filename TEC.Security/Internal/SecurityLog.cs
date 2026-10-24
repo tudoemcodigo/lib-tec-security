@@ -56,4 +56,8 @@ internal static partial class SecurityLog
 
     [LoggerMessage(3125, LogLevel.Information, "Segurança {Provider}: circuito fechado; o provedor de identidade voltou a responder.")]
     public static partial void CircuitClosed(ILogger logger, string provider);
+
+    [LoggerMessage(3403, LogLevel.Warning,
+        "Segurança: RolesAsPermissions habilitado explicitamente em ambiente multi-tenant; papéis atribuídos por administradores de tenants clientes atuarão como permissões.")]
+    public static partial void RolesAsPermissionsInMultiTenant(ILogger logger);
 }

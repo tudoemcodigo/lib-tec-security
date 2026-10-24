@@ -29,7 +29,7 @@ public sealed class SecurityOptions
     /// </summary>
     /// <remarks>
     /// Padrão (<c>null</c>, não configurado): <c>true</c>, exceto quando a aplicação registra um provedor multi-tenant (ex.:
-    /// <c>AddEntraIdApi</c> ou <c>AddEntraIdWebLogin</c> com <c>MultiTenant = true</c>), em que vale <c>false</c>: o
+    /// <c>AddOpenIdConnectApi</c> ou <c>AddOpenIdConnectWebLogin</c> com <c>MultiTenant = true</c>), em que vale <c>false</c>: o
     /// administrador de cada tenant cliente atribui qualquer app role aos próprios usuários, e o nome do papel não pode virar
     /// permissão sem uma decisão explícita. Defina <c>true</c> ou <c>false</c> para fixar o comportamento (<c>true</c> em
     /// multi-tenant gera o aviso 3403 na inicialização).

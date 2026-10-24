@@ -38,7 +38,7 @@ flowchart TD
 | Authority, audiências, emissor e algoritmos | Validação de assinatura, emissor, audiência e validade sempre ligada; lista de permissão de algoritmos |
 | Como converter claims em `ExternalIdentity` | Descarte de `tec_*`, tenant pelo cadastro, permissões, limites, auditoria e métricas |
 
-O pacote `TEC.Security.Testing` (`AddTestJwt`) e o `TEC.Security.EntraId` são exemplos completos.
+O pacote `TEC.Security.Testing` (`AddTestJwt`) e o `TEC.Security.OpenIdConnect` (`AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`) são exemplos completos.
 
 ---
 
@@ -154,7 +154,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 ```
 
 O TEC.Security aplica Authorization Code + PKCE, nonce, state, `form_post`, cookie `__Host-` endurecido, revalidação da
-sessão e 401 para chamadas de API ([🪪 Provedor Entra ID](provedor-entra-id.md#login-web) descreve o comportamento).
+sessão e 401 para chamadas de API ([🌐 Provedor OpenID Connect](provedor-openid-connect.md#login-web) descreve o comportamento).
 
 ### Checklist do provedor
 
@@ -180,6 +180,7 @@ sessão e 401 para chamadas de API ([🪪 Provedor Entra ID](provedor-entra-id.m
 | `CanHandle` | ✅ | `Func<JsonWebToken, bool>`: o token (lido sem validação) é deste provedor? |
 | `CreateIdentity` | ✅ | `CreateIdentityDelegate(TokenValidatedContext context, JsonWebToken token, out string reason)` → `ExternalIdentity?` |
 | `Configure` | — | `Action<JwtBearerOptions, IServiceProvider>`, aplicada depois dos padrões |
+| `SigningKeyValidator` | — | Única conferência de chave de assinatura aceita pelo `JwtHardening` (`IssuerSigningKeyValidatorUsingConfiguration`) |
 
 **`WebLoginDefinition`**
 

@@ -140,14 +140,19 @@ public static class JwtHardening
             "validação de emissor, audiência, validade e chave de assinatura não pode ser desligada.");
         Require(p.RequireExpirationTime && p.RequireSignedTokens && p.RequireAudience,
             "tokens sem expiração, sem assinatura ou sem audiência não podem ser aceitos.");
-        Require(p.SignatureValidator is null, "SignatureValidator personalizado não é permitido (desligaria a verificação de assinatura).");
+        Require(p.SignatureValidator is null && p.SignatureValidatorUsingConfiguration is null,
+            "SignatureValidator personalizado não é permitido (desligaria a verificação de assinatura).");
         Require(p.LifetimeValidator is null, "LifetimeValidator personalizado não é permitido.");
         Require(p.ClockSkew >= TimeSpan.Zero && p.ClockSkew <= MaxClockSkew, "ClockSkew deve ficar entre 0 e 2 minutos.");
         Require(!options.MapInboundClaims && !options.SaveToken, "MapInboundClaims e SaveToken devem ficar desligados.");
-        Require(options.RequireHttpsMetadata, "metadados e chaves de assinatura (JWKS) só podem ser obtidos por HTTPS (RequireHttpsMetadata).");
-        Require(p.ValidAudience is not null || p.ValidAudiences?.Any() == true || p.AudienceValidator is not null,
+        Require(options.RequireHttpsMetadata || IsLoopback(options.Authority),
+            "metadados e chaves de assinatura (JWKS) só podem ser obtidos por HTTPS (RequireHttpsMetadata).");
+        Require(p.AudienceValidator is null, "AudienceValidator personalizado não é permitido (informe ValidAudiences).");
+        Require(p.ValidAudience is not null || p.ValidAudiences?.Any() == true,
             "informe as audiências aceitas.");
-        Require(p.ValidIssuer is not null || p.ValidIssuers?.Any() == true || p.IssuerValidator is not null,
+        Require(p.IssuerValidator is null && p.IssuerValidatorUsingConfiguration is null,
+            "IssuerValidator personalizado não é permitido (informe ValidIssuers).");
+        Require(p.ValidIssuer is not null || p.ValidIssuers?.Any() == true,
             "informe o emissor aceito.");
         Require(p.AlgorithmValidator is null, "AlgorithmValidator personalizado não é permitido (use ValidAlgorithms).");
         Require(p.IssuerSigningKeyResolver is null && p.IssuerSigningKeyResolverUsingConfiguration is null,
@@ -158,6 +163,8 @@ public static class JwtHardening
         Require(p.TokenReader is null, "TokenReader personalizado não é permitido.");
         Require(p.TokenDecryptionKeyResolver is null && p.TokenDecryptionKey is null && p.TokenDecryptionKeys?.Any() != true,
             "tokens cifrados (JWE) não são suportados: remova as chaves de decifração.");
+        Require(p.TransformBeforeSignatureValidation is null, "TransformBeforeSignatureValidation não é permitido.");
+        Require(p.CryptoProviderFactory is null, "CryptoProviderFactory personalizada não é permitida.");
         Require(!options.UseSecurityTokenValidators && options.TokenHandlers.Count == 1
             && options.TokenHandlers[0] is JsonWebTokenHandler { MapInboundClaims: false } handler
             && handler.MaximumTokenSizeInBytes > 0 && handler.MaximumTokenSizeInBytes <= maxTokenLength,
@@ -166,5 +173,14 @@ public static class JwtHardening
             allowSymmetricKeys
                 ? "informe os algoritmos aceitos (ValidAlgorithms): RS*, PS*, ES* ou HS*; 'none' não é permitido."
                 : "informe os algoritmos aceitos (ValidAlgorithms) só entre RS*, PS* e ES*: 'none' e HMAC (HS256...) não são permitidos para provedores externos.");
+    }
+
+    private static bool IsLoopback(string? authority)
+    {
+        if (string.IsNullOrWhiteSpace(authority))
+            return false;
+        if (Uri.TryCreate(authority, UriKind.Absolute, out var uri))
+            return uri.IsLoopback;
+        return false;
     }
 }

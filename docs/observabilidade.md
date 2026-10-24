@@ -27,7 +27,7 @@
 flowchart LR
     SEC["TEC.Security"] --> M["Meter TEC.Security<br/>falhas · negações · tokens de serviço"]
     SEC --> A["ActivitySource TEC.Security<br/>security.token.acquire"]
-    SEC --> L["ILogger (LoggerMessage)<br/>eventos 3000–3499"]
+    SEC --> L["ILogger (LoggerMessage)<br/>eventos 3000–3399"]
     M & A --> OBS["TEC.Observability<br/>(ou OpenTelemetry direto)"]
     L --> LOG["Seu provedor de logs"]
 ```
@@ -36,9 +36,9 @@ flowchart LR
 |---|---|---|
 | Meter | `TEC.Security` (versão do assembly) | Baixa: esquema, motivo, provedor, cache, tipo de erro |
 | ActivitySource | `TEC.Security` | Um span por obtenção de token de serviço sem cache |
-| Logs | Categorias das classes (`SecurityIdentityFactory`, `ApiKeyValidator`...) e `TEC.Security.AspNetCore.*`, `TEC.Security.EntraId*` | Mensagens por *source generator*, sem alocação com o nível desligado |
+| Logs | Categorias das classes (`SecurityIdentityFactory`, `ApiKeyValidator`...) e `TEC.Security.AspNetCore.*` | Mensagens por *source generator*, sem alocação com o nível desligado |
 
-Faixas de eventos: núcleo 3000–3199, ASP.NET Core 3200–3399, Entra ID 3400–3499.
+Faixas de eventos: núcleo 3000–3199 e ASP.NET Core 3200–3399.
 
 ---
 
@@ -62,8 +62,8 @@ builder.Services.AddOpenTelemetry()
 |---|---|---|---|
 | `security.authentication.failures` | Contador | `{failure}` | `security.scheme`, `security.reason` |
 | `security.authorization.denied` | Contador | `{denial}` | `security.scheme` (`none` sem esquema), `security.reason` |
-| `security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`EntraId`, `EntraId.OnBehalfOf`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
-| `security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`EntraId`, `EntraId.OnBehalfOf`), `security.circuit.state` (`open`, `half_open`, `closed`) |
+| `security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
+| `security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.circuit.state` (`open`, `half_open`, `closed`) |
 
 | `security.reason` (autenticação) | Origem |
 |---|---|
@@ -84,9 +84,10 @@ builder.Services.AddOpenTelemetry()
 
 | Span | Tipo | Quando | Atributos |
 |---|---|---|---|
-| `security.token.acquire` | Client | Obtenção de token de serviço sem cache (client credentials e On-Behalf-Of) | `security.provider`; em falha, status `Error` (e `error.type` no client credentials) |
+| `security.token.acquire` | Client | Obtenção de token de serviço sem cache por um provedor baseado em `CachingAccessTokenProvider` | `security.provider`, `error.type` e status `Error` em falha |
 
-A validação de tokens de entrada não gera span próprio: o tempo aparece no span HTTP do ASP.NET Core.
+A validação de tokens de entrada não gera span próprio: o tempo aparece no span HTTP do ASP.NET Core. O provedor OpenID Connect
+(`OpenIdConnect.M2M`) registra a métrica `security.token.acquisition.duration`, mas não inicia este span.
 
 ### Eventos de log
 
@@ -100,10 +101,10 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | 3102 | Warning | `AddTecSecurity` (subida) | `Security:Permissions:Tenants:{id}` sem tenant correspondente no cadastro |
 | 3110 | Warning | `ApiKeyValidator` | **Auditoria:** API key recusada (motivo e id, nunca o segredo); no máximo um por id + motivo por minuto, com a contagem das omitidas |
 | 3111 | Error | `ApiKeyValidator` | Cadastro recarregado com erro (uma vez por versão): chaves com erro recusadas, as demais valem |
-| 3120 | Error | Provedor de token | Falha ao obter token de serviço sem token válido em cache (tipo da exceção) |
-| 3121 | Warning | `AccessTokenHandler` | Requisição bloqueada: destino fora de `AllowedHosts`/sem HTTPS (host) |
-| 3122 | Warning | Provedor de token | Renovação falhou; o token atual, ainda válido por mais de 30 s, continua em uso |
-| 3123 | Warning | Circuit breaker | Circuito aberto após falhas repetidas do provedor de identidade (duração da pausa) |
+| 3120 | Error | `CachingAccessTokenProvider` | Falha ao obter token de serviço sem token válido em cache (tipo da exceção) |
+| 3121 | Warning | `AccessTokenHandler` | Requisição bloqueada: destino fora de `AllowedHosts`/sem HTTPS (host). Só com o handler criado com logger (o `AddOpenIdConnectAccessToken` não passa logger) |
+| 3122 | Warning | `CachingAccessTokenProvider` | Renovação falhou; o token atual, ainda válido por mais de 30 s, continua em uso |
+| 3123 | Warning | Circuit breaker | Circuito aberto após falhas repetidas do provedor de identidade (duração da pausa); só com logger no circuito (o provedor OpenID Connect o informa) |
 | 3124 | Information | Circuit breaker | Circuito meio-aberto: chamada de teste |
 | 3125 | Information | Circuit breaker | Circuito fechado: o provedor voltou a responder |
 | 3201 | Information | `TEC.Security.AspNetCore.JwtBearer` | Token recusado (tipo da exceção ou motivo; nunca a mensagem) |
@@ -113,9 +114,6 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | 3205 | Information | `TEC.Security.AspNetCore.WebLogin` | Sessão web recusada na revalidação (motivo); falha passageira do `IPermissionStore` recusa só a requisição e mantém a sessão |
 | 3206 | Information | `EndpointSecurityValidator` | Endpoints conferidos na subida (quantidade) |
 | 3207 | Information | `TEC.Security.AspNetCore.WebLogin` | Login web recusado (tipo ou motivo) |
-| 3401 | Error | `EntraIdOnBehalfOfHandler` | On-Behalf-Of falhou: id do usuário e tipo do erro, com a exceção anexada (sem token; erro do Entra só como código OAuth validado) |
-| 3402 | Error | `TEC.Security.EntraId.WebLogin` | Credencial da aplicação indisponível na troca do código do login web |
-| 3403 | Warning | `TEC.Security.EntraId` | Aplicação multi-tenant com `RolesAsPermissions = true` explícito |
 
 ### Alertas sugeridos
 
@@ -123,9 +121,7 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 - 3110 repetido para o mesmo id (chave vazada ou integração quebrada); 3110 com `chave expirada` (rotação esquecida).
 - 3203 repetido para o mesmo id (tentativa de escalonamento).
 - 3123 (circuito aberto: o provedor de identidade está falhando para todos os usuários).
-- Qualquer 3003, 3101, 3111, 3120, 3401 ou 3402 (falha de infraestrutura ou configuração); 3122 frequente (provedor
-  instável).
-- 3403 em produção (multi-tenant sem permissões por tenant).
+- Qualquer 3003, 3101, 3111 ou 3120 (falha de infraestrutura ou configuração); 3122 frequente (provedor instável).
 
 ---
 
@@ -146,7 +142,7 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | `StartTokenAcquisition(provider)` | `Activity?` da obtenção de token (`null` sem ouvinte) |
 
 Os níveis de log seguem a configuração normal do `ILogger`. Todas as categorias começam com `TEC.Security` (nome completo
-da classe, ou `TEC.Security.AspNetCore.JwtBearer`, `TEC.Security.AspNetCore.WebLogin`, `TEC.Security.EntraId`...), então
+da classe, ou `TEC.Security.AspNetCore.JwtBearer`, `TEC.Security.AspNetCore.WebLogin`...), então
 `"Logging": { "LogLevel": { "TEC.Security": "Information" } }` cobre o componente inteiro (o filtro é por prefixo).
 
 ---
@@ -165,12 +161,12 @@ da classe, ou `TEC.Security.AspNetCore.JwtBearer`, `TEC.Security.AspNetCore.WebL
 
 > [!IMPORTANT]
 > Nenhum trace ou métrica leva token, id de usuário, nome ou e-mail (costumam ir para terceiros). Os logs de auditoria
-> (3110, 3203) levam ids técnicos (`oid`, id da API key, tenant) para investigação: trate o destino de logs como dado
+> (3110, 3203) levam ids técnicos (`sub`, id da API key, tenant) para investigação: trate o destino de logs como dado
 > pessoal.
 
 - Mensagens de exceção de validação de token nunca são registradas (podem conter partes do token): só o tipo.
-- Erros do endpoint de token do Entra ID chegam ao log só como o código OAuth validado (`invalid_grant`...) ou
-  `codigo-invalido`.
+- A mensagem da exceção de falha do endpoint de token do provedor OpenID Connect inclui o corpo da resposta do IdP e não é
+  registrada pelo componente: ao registrá-la na aplicação, trate-a como dado sensível.
 - Valores do usuário nos logs passam por formatos validados; injeção de linha no log não é possível.
 
 ---

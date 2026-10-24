@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// <para>Os provedores de identidade são adicionados no <paramref name="configure"/> pelos pacotes de provedor
-    /// (ex.: <c>security.AddAspNetCore()</c> e <c>security.AddEntraIdApi(...)</c>).</para>
+    /// (ex.: <c>security.AddAspNetCore()</c> e <c>security.AddOpenIdConnectApi(...)</c>).</para>
     /// <para>Validação na inicialização (o host não sobe): cadastro de tenants e de API keys.</para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">Chamado mais de uma vez.</exception>
@@ -36,7 +36,7 @@ public static class ServiceCollectionExtensions
     /// <code>
     /// builder.Services.AddTecSecurity(builder.Configuration, security =&gt; security
     ///     .AddAspNetCore()
-    ///     .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId")));
+    ///     .AddOpenIdConnectApi("Keycloak", builder.Configuration.GetSection("Security:Keycloak")));
     /// </code>
     /// </example>
     public static SecurityBuilder AddTecSecurity(this IServiceCollection services, IConfiguration configuration,

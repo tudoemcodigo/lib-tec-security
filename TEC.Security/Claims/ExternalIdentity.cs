@@ -42,6 +42,9 @@ public sealed class ExternalIdentity
     /// <summary>Escopos delegados (somente <see cref="PrincipalKind.User"/>).</summary>
     public IReadOnlyCollection<string> Scopes { get; init; } = [];
 
+    /// <summary>Indica se a identidade foi originada de um provedor multi-tenant.</summary>
+    public bool MultiTenant { get; init; }
+
     /// <summary>Permissões concedidas diretamente (ex.: configuradas na API key), somadas às do <c>IPermissionStore</c>.</summary>
     public IReadOnlyCollection<string> Permissions { get; init; } = [];
 

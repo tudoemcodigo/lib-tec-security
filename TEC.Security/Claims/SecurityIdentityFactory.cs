@@ -148,7 +148,14 @@ public sealed class SecurityIdentityFactory
         }
 
         IEnumerable<string> candidates = identity.Permissions.Concat(stored ?? []);
-        if (options.RolesAsPermissions ?? true)
+        bool effectiveRolesAsPermissions = options.RolesAsPermissions ?? !identity.MultiTenant;
+
+        if (options.RolesAsPermissions == true && identity.MultiTenant)
+        {
+            SecurityLog.RolesAsPermissionsInMultiTenant(_logger);
+        }
+
+        if (effectiveRolesAsPermissions)
             candidates = candidates.Concat(roles);
 
         if (!TryNormalize(identity, candidates, "permissões", out var permissions))

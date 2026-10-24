@@ -14,7 +14,10 @@ public sealed class OpenIdConnectApiOptions
     /// <summary>Lista de audiências aceitas pela API.</summary>
     public List<string> Audiences { get; set; } = [];
 
-    /// <summary>Exige metadados e chaves JWKS exclusivamente via HTTPS. Padrão: <c>true</c>.</summary>
+    /// <summary>Emissores adicionais aceitos (útil em cenários multi-tenant onde cada tenant possui um realm ou emissor específico).</summary>
+    public List<string> ValidIssuers { get; set; } = [];
+
+    /// <summary>Exige metadados e chaves JWKS exclusivamente via HTTPS (permitido falso apenas para Authority em loopback local). Padrão: <c>true</c>.</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 
     /// <summary>

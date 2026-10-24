@@ -24,7 +24,7 @@
 ```mermaid
 flowchart LR
     TK["Token<br/>tid = 72f9...e1"] --> F["SecurityIdentityFactory"]
-    F -->|"FindByExternalId(EntraId, 72f9...e1)"| R[("ITenantRegistry<br/>snapshot imutável")]
+    F -->|"FindByExternalId(OpenIdConnect, 72f9...e1)"| R[("ITenantRegistry<br/>snapshot imutável")]
     R -->|"contoso (ativo)"| N["tec_tenant = contoso"]
     R -->|"inativo"| X1["401"]
     R -->|"não cadastrado + RequireTenant"| X2["401"]
@@ -38,8 +38,8 @@ flowchart LR
   web já abertas, **mesmo que outra entrada da mesma edição tenha erro** (log 3101): a recarga vale por entrada e só as
   entradas com erro falham fechadas (id fora do formato, vazio ou repetido com outra grafia: tenant sai do cadastro;
   provedor ou id externo fora do formato: tenant inativo; id externo em dois tenants: deixa de ser resolvido).
-- Em APIs Entra ID multi-tenant, o cadastro também decide **quais tenants do Entra ID são aceitos** na validação do token
-  ([🪪 Provedor Entra ID](provedor-entra-id.md#multi-tenant)).
+- Com `MultiTenant = true` no `AddOpenIdConnectApi`, o cadastro também decide **quais tenants do provedor são aceitos** na
+  validação do token ([🪪 Provedor Entra ID](provedor-entra-id.md#multi-tenant)).
 
 | Situação | `RequireTenant = false` (padrão) | `RequireTenant = true` |
 |---|---|---|
@@ -62,12 +62,12 @@ flowchart LR
     "contoso": {
       "Name": "Contoso Ltda",
       "Enabled": true,
-      "IdentityProviders": { "EntraId": [ "<tenant-id-da-contoso>" ] }
+      "IdentityProviders": { "OpenIdConnect": [ "<tenant-id-da-contoso>" ] }
     },
     "fabrikam": {
       "Name": "Fabrikam",
       "Enabled": false,
-      "IdentityProviders": { "EntraId": [ "<tenant-id-da-fabrikam>", "<segundo-tenant-id-da-fabrikam>" ] }
+      "IdentityProviders": { "OpenIdConnect": [ "<tenant-id-da-fabrikam>", "<segundo-tenant-id-da-fabrikam>" ] }
     },
     "parceiro-x": {
       "IdentityProviders": { "Test": [ "tenant-de-teste" ] }
@@ -76,7 +76,7 @@ flowchart LR
 }
 ```
 
-Cada chave é o id do tenant na aplicação. A chave de `IdentityProviders` é o tipo do provedor (`EntraId`, `Test` ou o
+Cada chave é o id do tenant na aplicação. A chave de `IdentityProviders` é o tipo do provedor (`OpenIdConnect`, `Test` ou o
 `Provider` de um provedor próprio).
 
 ### Ler o tenant atual
@@ -86,7 +86,7 @@ using TEC.Security.Abstractions;
 
 app.MapGet("/tenant", (ICurrentTenant tenant) => new { tenant.Id, Nome = tenant.Info?.Name });
 
-// Liberar um tenant do Entra ID na hora (ex.: tela de administração) = mudar a configuração com recarga
+// Liberar um tenant na hora (ex.: tela de administração) = mudar a configuração com recarga
 public sealed class PainelTenants(ITenantRegistry tenants)
 {
     public bool Ativo(string tenantId) => tenants.Find(tenantId) is { Enabled: true };
@@ -143,7 +143,7 @@ public sealed class TenantsDoBanco : ITenantRegistry
 builder.Services.AddTecSecurity(builder.Configuration, security => security
     .UseTenantRegistry<TenantsDoBanco>()   // Singleton; Security:Tenants deixa de ser lido
     .AddAspNetCore()
-    .AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api")));
+    .AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api")));
 ```
 
 > [!IMPORTANT]
@@ -161,7 +161,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 |---|---|---|
 | `Name` | `null` | Nome de exibição (saneado como o nome de usuário) |
 | `Enabled` | `true` | Tenant ativo. Inativo: identidades dele não autenticam, inclusive sessões abertas |
-| `IdentityProviders` | vazio | Ids externos por tipo de provedor (`EntraId` → lista de `tid`). O mesmo id externo não pode estar em dois tenants |
+| `IdentityProviders` | vazio | Ids externos por tipo de provedor (`OpenIdConnect` → lista de `tid`). O mesmo id externo não pode estar em dois tenants |
 
 | Regra de validação | Formato |
 |---|---|
@@ -175,7 +175,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 |---|---|
 | `FindByExternalId(string provider, string externalTenantId)` | Tenant vinculado ao id externo (sem diferenciar maiúsculas ASCII), ou `null` |
 | `Find(string tenantId)` | Tenant pelo id da aplicação (sem diferenciar maiúsculas), ou `null` |
-| `GetEnabledExternalIds(string provider)` | Ids externos dos tenants **ativos** do provedor (usado pela API Entra ID multi-tenant) |
+| `GetEnabledExternalIds(string provider)` | Ids externos dos tenants **ativos** do provedor (para provedores próprios que validem o tenant) |
 
 `TenantInfo(string Id, string? Name, bool Enabled)` · `ICurrentTenant` (Scoped): `Id`, `Info`.
 
@@ -203,9 +203,8 @@ consultas sem bloqueio.
 
 > [!WARNING]
 > Em APIs multi-tenant, o administrador de cada tenant cliente consegue atribuir **qualquer** app role da sua app aos
-> próprios usuários. Use `RolesAsPermissions: false` e deixe permissões privilegiadas só em
-> `Security:Permissions:Tenants:<tenant-da-sua-empresa>:Roles`. Enquanto isso não for feito, a API Entra ID registra o
-> aviso 3403 na subida.
+> próprios usuários. Defina `RolesAsPermissions: false` (o padrão, quando não definido, é `true`) e deixe permissões
+> privilegiadas só em `Security:Permissions:Tenants:<tenant-da-sua-empresa>:Roles`.
 
 - Falha fechada na recarga: um `appsettings` quebrado não libera nem bloqueia tenants por engano.
 - Para o cliente, tenant não permitido é indistinguível de credencial inválida (401 genérico): não revela quais tenants
@@ -239,4 +238,4 @@ O `IConfiguration` mescla listas JSON por índice. Mantenha o cadastro numa úni
 </details>
 
 ---
-⬅️ [👤 Identidade e permissões](identidade-e-permissoes.md) · [📚 Índice](README.md) · [🪪 Provedor Entra ID](provedor-entra-id.md) ➡️
+⬅️ [👤 Identidade e permissões](identidade-e-permissoes.md) · [📚 Índice](README.md) · [🌐 Provedor OpenID Connect](provedor-openid-connect.md) ➡️

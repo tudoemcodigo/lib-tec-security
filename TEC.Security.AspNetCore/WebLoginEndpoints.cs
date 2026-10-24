@@ -30,7 +30,7 @@ public static class WebLoginEndpoints
         {
             var schemes = context.RequestServices.GetRequiredService<SecuritySchemes>();
             string cookie = schemes.CookieScheme
-                            ?? throw new InvalidOperationException("Nenhum login web registrado (ex.: security.AddEntraIdWebLogin(...)).");
+                            ?? throw new InvalidOperationException("Nenhum login web registrado (ex.: security.AddOpenIdConnectWebLogin(...)).");
 
             string? returnUrl = context.Request.Query["returnUrl"].Count == 1 ? context.Request.Query["returnUrl"][0] : null;
             return context.ChallengeAsync(cookie, new AuthenticationProperties { RedirectUri = SafeReturnUrl(returnUrl) });

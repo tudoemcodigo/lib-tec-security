@@ -228,12 +228,22 @@ public static class SecurityBuilderWebLoginExtensions
         var p = o.TokenValidationParameters;
         Require(o.ResponseType == OpenIdConnectResponseType.Code, "use somente o fluxo Authorization Code (ResponseType = code).");
         Require(o.UsePkce, "PKCE não pode ser desligado.");
-        Require(o.RequireHttpsMetadata, "metadados devem ser obtidos por HTTPS.");
+        Require(o.RequireHttpsMetadata || (o.Authority is not null && Uri.TryCreate(o.Authority, UriKind.Absolute, out var aUri) && aUri.IsLoopback),
+            "metadados devem ser obtidos por HTTPS (exceto loopback local).");
         Require(o.ProtocolValidator.RequireNonce && o.ProtocolValidator.RequireState, "nonce e state não podem ser desligados.");
         Require(p.ValidateIssuer && p.ValidateAudience && p.ValidateLifetime && p.ValidateIssuerSigningKey && p.RequireSignedTokens,
             "validação do ID token não pode ser desligada.");
-        Require(p.SignatureValidator is null && p.LifetimeValidator is null, "validadores personalizados de assinatura/validade não são permitidos.");
+        Require(p.SignatureValidator is null && p.SignatureValidatorUsingConfiguration is null, "SignatureValidator personalizado não é permitido.");
+        Require(p.LifetimeValidator is null, "LifetimeValidator personalizado não é permitido.");
         Require(p.AlgorithmValidator is null, "AlgorithmValidator personalizado não é permitido (use ValidAlgorithms).");
+        Require(p.IssuerSigningKeyResolver is null && p.IssuerSigningKeyResolverUsingConfiguration is null, "IssuerSigningKeyResolver personalizado não é permitido.");
+        Require(p.IssuerSigningKeyValidator is null && p.IssuerSigningKeyValidatorUsingConfiguration is null, "IssuerSigningKeyValidator personalizado não é permitido.");
+        Require(p.IssuerValidator is null && p.IssuerValidatorUsingConfiguration is null, "IssuerValidator personalizado não é permitido.");
+        Require(p.AudienceValidator is null, "AudienceValidator personalizado não é permitido.");
+        Require(p.TokenReader is null, "TokenReader personalizado não é permitido.");
+        Require(p.TokenDecryptionKeyResolver is null && p.TokenDecryptionKey is null && p.TokenDecryptionKeys?.Any() != true, "tokens cifrados não são permitidos.");
+        Require(p.TransformBeforeSignatureValidation is null, "TransformBeforeSignatureValidation não é permitido.");
+        Require(p.CryptoProviderFactory is null, "CryptoProviderFactory personalizada não é permitida.");
         Require(JwtHardening.AreAllowedAlgorithms(p.ValidAlgorithms, allowSymmetricKeys: false),
             "informe os algoritmos aceitos (ValidAlgorithms) só entre RS*, PS* e ES*: 'none' e HMAC não são permitidos.");
         Require(!o.SaveTokens && !o.MapInboundClaims, "SaveTokens e MapInboundClaims devem ficar desligados (tokens fora do cookie, claims originais).");

@@ -86,8 +86,19 @@ public static class OpenIdConnectExtensions
 
                 string authTrimmed = options.Authority.TrimEnd('/');
                 string issTrimmed = jwt.Issuer.TrimEnd('/');
-                if (!issTrimmed.Equals(authTrimmed, StringComparison.OrdinalIgnoreCase) && !options.MultiTenant)
-                    return false;
+                bool issuerMatches = issTrimmed.Equals(authTrimmed, StringComparison.OrdinalIgnoreCase);
+
+                if (!issuerMatches)
+                {
+                    if (!options.MultiTenant)
+                        return false;
+
+                    if (options.ValidIssuers.Count > 0 &&
+                        !options.ValidIssuers.Any(i => i.TrimEnd('/').Equals(issTrimmed, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return false;
+                    }
+                }
 
                 return jwt.Audiences.Any(a => audiences.Contains(a, StringComparer.OrdinalIgnoreCase));
             },
@@ -100,7 +111,21 @@ public static class OpenIdConnectExtensions
             {
                 jwtOptions.Authority = options.Authority;
                 jwtOptions.RequireHttpsMetadata = options.RequireHttpsMetadata;
-                jwtOptions.TokenValidationParameters.ValidIssuers = [options.Authority.TrimEnd('/'), options.Authority.TrimEnd('/') + "/"];
+
+                var issuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    options.Authority.TrimEnd('/'),
+                    options.Authority.TrimEnd('/') + "/"
+                };
+                foreach (var iss in options.ValidIssuers)
+                {
+                    if (!string.IsNullOrWhiteSpace(iss))
+                    {
+                        issuers.Add(iss.TrimEnd('/'));
+                        issuers.Add(iss.TrimEnd('/') + "/");
+                    }
+                }
+                jwtOptions.TokenValidationParameters.ValidIssuers = issuers;
                 jwtOptions.TokenValidationParameters.ValidAudiences = audiences;
 
                 if (options.ValidAlgorithms.Count > 0)
@@ -159,12 +184,12 @@ public static class OpenIdConnectExtensions
                 }
                 else if (!string.IsNullOrEmpty(options.ClientSecretName))
                 {
-                    var secretReader = sp.GetService<ISecretReader>();
-                    if (secretReader is not null)
-                    {
-                        var secretResult = secretReader.GetSecretAsync(options.ClientSecretName).GetAwaiter().GetResult();
-                        oidcOptions.ClientSecret = secretResult.IsSuccess ? secretResult.Value.Value : null;
-                    }
+                    var secretReader = sp.GetService<ISecretReader>()
+                        ?? throw new InvalidOperationException($"OpenID Connect WebLogin '{scheme}': ClientSecretName '{options.ClientSecretName}' informado, mas nenhum ISecretReader está registrado.");
+                    var secretResult = secretReader.GetSecretAsync(options.ClientSecretName).GetAwaiter().GetResult();
+                    if (!secretResult.IsSuccess || secretResult.Value is null || string.IsNullOrEmpty(secretResult.Value.Value))
+                        throw new InvalidOperationException($"OpenID Connect WebLogin '{scheme}': falha ao obter o segredo '{options.ClientSecretName}' do cofre TEC.Vault.");
+                    oidcOptions.ClientSecret = secretResult.Value.Value;
                 }
 
                 oidcOptions.Scope.Clear();
@@ -183,8 +208,8 @@ public static class OpenIdConnectExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(configure);
 
-        builder.Services.AddHttpClient<IAccessTokenProvider, OpenIdConnectAccessTokenProvider>((sp, client) => { });
-        builder.Services.AddSingleton(sp =>
+        builder.Services.AddHttpClient("OpenIdConnect.M2M");
+        builder.Services.AddSingleton<OpenIdConnectAccessTokenProvider>(sp =>
         {
             var options = new OpenIdConnectClientOptions();
             configure(options);
@@ -192,8 +217,10 @@ public static class OpenIdConnectExtensions
             var httpClient = httpClientFactory.CreateClient("OpenIdConnect.M2M");
             var secretReader = sp.GetService<ISecretReader>();
             var time = sp.GetService<TimeProvider>() ?? TimeProvider.System;
-            return new OpenIdConnectAccessTokenProvider(httpClient, options, secretReader, time);
+            var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<OpenIdConnectAccessTokenProvider>>();
+            return new OpenIdConnectAccessTokenProvider(httpClient, options, secretReader, time, logger);
         });
+        builder.Services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<OpenIdConnectAccessTokenProvider>());
 
         return builder;
     }

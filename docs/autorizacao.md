@@ -243,7 +243,7 @@ Use só `[AllowAnonymous]` (ou `.AllowAnonymous()`), sem `[TecAuthorize]` no mes
 </details>
 
 <details>
-<summary>O usuário tem o papel no Entra ID, mas recebe 403.</summary>
+<summary>O usuário tem o papel no provedor de identidade, mas recebe 403.</summary>
 
 O papel não virou a permissão exigida: `RolesAsPermissions: false` sem mapeamento em `Security:Permissions`, nome
 diferente (a comparação diferencia maiúsculas) ou `Kinds`/`Scopes` restringindo o tipo de token. O log 3203 traz o motivo.
