@@ -6,13 +6,13 @@
 
 **Autenticação e autorização com uma única API para qualquer provedor de login: fechado por padrão, multi-tenant e sem segredos na aplicação.**
 
-Microsoft Entra ID · OpenID Connect agnóstico (Keycloak, Auth0, Okta, Google, Cognito) · `[TecAuthorize]` por permissão · Tenants por configuração · API keys · Login web (OIDC + PKCE) · Chamadas entre serviços M2M (Client Credentials) · Workers · .NET 8 e 10 · Native AOT
+OpenID Connect agnóstico (Keycloak, Auth0, Okta, Microsoft Entra ID, Google, Cognito) · `[TecAuthorize]` por permissão · Tenants por configuração · API keys · Login web (OIDC + PKCE) · Chamadas entre serviços M2M (Client Credentials) · Workers · .NET 8 e 10 · Native AOT
 
 [![CI](https://github.com/tudoemcodigo/lib-tec-security/actions/workflows/ci.yml/badge.svg)](https://github.com/tudoemcodigo/lib-tec-security/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](#-compatibilidade)
 [![Native AOT](https://img.shields.io/badge/Native%20AOT-compat%C3%ADvel-512BD4)](#-compatibilidade)
 [![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)](CHANGELOG.md)
-[![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-green)](LICENSE)
+[![Licença: Apache 2.0](https://img.shields.io/badge/licen%C3%A7a-Apache%202.0-blue)](LICENSE)
 
 [📥 Instalação](#-instalação) · [🚀 Início rápido](#-início-rápido) · [📚 Documentação](docs/README.md) · [📝 Changelog](CHANGELOG.md) · [⚙️ CI/CD](.github/workflows/README.md)
 
@@ -45,9 +45,9 @@ Microsoft Entra ID · OpenID Connect agnóstico (Keycloak, Auth0, Okta, Google, 
 | Cada sistema configura `AddJwtBearer` de um jeito; alguém desliga `ValidateAudience` "para funcionar" | Validação endurecida em todo provedor; os controles obrigatórios **não podem** ser desligados (a aplicação não sobe), nem por `PostConfigure` |
 | Endpoint esquecido sem `[Authorize]` fica público | Fechado por padrão: sem atributo, exige identidade; `[TecAuthorize]` + `[AllowAnonymous]` impede a subida |
 | Código lê `roles`, `scp`, `realm_access`... de cada provedor | `ISecurityUser` com id, tenant, papéis, escopos e permissões normalizados, iguais para qualquer provedor |
-| Multi-tenant aceitando "qualquer tenant" do Entra ID | Só tenants **ativos** no cadastro (appsettings com recarga, ou banco); desativar vale na próxima requisição |
+| Multi-tenant aceitando "qualquer tenant" do provedor | Com `MultiTenant`, só tenants **ativos** no cadastro (appsettings com recarga, ou banco); desativar vale na próxima requisição |
 | Claim `permissions` injetado por um IdP mal configurado vira permissão | Claims `tec_*` vindos do provedor são descartados; tenant e permissões vêm do cadastro da aplicação |
-| Client secret no `appsettings` para chamar outra API | Identidade gerenciada federada, Workload Identity ou certificado assinando **dentro** do cofre |
+| Client secret no `appsettings` para chamar outra API | Só o **nome** do segredo na configuração; o valor vem do TEC.Vault |
 | Token de serviço enviado para qualquer URL (SSRF) | Token anexado só aos `AllowedHosts`, com HTTPS |
 | 401/403 em formatos diferentes, com o motivo da recusa | `ApiResponse` padrão do TEC.Core; motivo só no log de auditoria e nas métricas |
 
@@ -95,8 +95,8 @@ O TEC.Security decide **quem** executa cada operação. A identidade que ele nor
 
 | Componente | Relação com o TEC.Security |
 |---|---|
-| 🧰 [TEC.Core](https://github.com/tudoemcodigo/lib-tec-core) | Dependência: `ICurrentUser` (implementado aqui), `Result`/`Error`, `AppException`, `ApiResponse`, `SingleFlight`, `Base64UrlEncoder`, `BoundedFileReader` |
-| 🔐 [TEC.Vault](https://github.com/tudoemcodigo/lib-tec-vault) | Dependência do `TEC.Security.EntraId`: certificado e segredo da aplicação; client assertion assinada no cofre |
+| 🧰 [TEC.Core](https://github.com/tudoemcodigo/lib-tec-core) | Dependência: `ICurrentUser` (implementado aqui), `Result`/`Error`, `AppException`, `ApiResponse`, `SingleFlight`, `Base64UrlEncoder`, `SensitiveDataMasker` |
+| 🔐 [TEC.Vault](https://github.com/tudoemcodigo/lib-tec-vault) | Dependência do `TEC.Security.OpenIdConnect`: segredo do cliente (`ISecretReader`) do login web e das chamadas entre serviços |
 | 🧭 [TEC.Cqrs](https://github.com/tudoemcodigo/lib-tec-cqrs) | Independente: `[AuthorizeRequest]` avalia a identidade normalizada |
 | 🗄️ [TEC.ORM](https://github.com/tudoemcodigo/lib-tec-orm) | Independente: a auditoria lê o `ICurrentUser` registrado aqui |
 | 📡 [TEC.Observability](https://github.com/tudoemcodigo/lib-tec-observability) | Independente: assina o Meter e o ActivitySource `TEC.Security` |
@@ -127,7 +127,7 @@ dotnet add package TEC.Security.Testing --version 0.0.1    # só no projeto de t
   "Security": {
     "RequireTenant": true,
     "OpenIdConnect": {
-      "Api": { "Authority": "https://auth.empresa.com/realms/corp", "Audience": "api-pedidos" }
+      "Api": { "Authority": "https://auth.empresa.com/realms/corp", "Audience": "api-pedidos", "MultiTenant": true }
     },
     "Tenants": {
       "contoso": { "Name": "Contoso", "IdentityProviders": { "OpenIdConnect": [ "https://auth.empresa.com/realms/corp" ] } }
@@ -179,14 +179,14 @@ public sealed class PedidosController : ControllerBase
 ```
 
 Endpoints sem atributo já exigem identidade, 401/403 saem no formato do TEC.Core e configuração errada ou insegura derruba
-a **subida**, não a primeira requisição. App registration, login web, API keys e workers: [📚 documentação](docs/README.md).
+a **subida**, não a primeira requisição. Entra ID, login web, API keys e workers: [📚 documentação](docs/README.md).
 
 ## 🧭 O que tem dentro
 
 ```mermaid
 flowchart LR
     REQ["Requisição"] --> SEL{"Seletor TEC<br/>lê a credencial sem confiar"}
-    SEL -->|"iss do Entra"| ENTRA["JwtBearer Entra ID<br/>validação endurecida"]
+    SEL -->|"iss de um provedor"| ENTRA["JwtBearer OpenID Connect<br/>validação endurecida"]
     SEL -->|"X-Api-Key"| KEY["API key<br/>hash SHA-256"]
     SEL -->|"cookie"| WEB["Login web<br/>OIDC + PKCE"]
     SEL -->|"desconhecida"| NONE["TEC.None → 401"]
@@ -202,8 +202,8 @@ flowchart LR
 | 👤 Identidade normalizada | `ISecurityUser`, `TecClaimTypes`, `SecurityIdentityFactory`, `ExternalIdentity` |
 | 🔐 Autorização | `[TecAuthorize]`, `RequireTecAuthorization`, `TecPrincipalKinds`, `FallbackPolicy` fechada |
 | 🏢 Tenants e permissões | `ITenantRegistry`, `ICurrentTenant`, `IPermissionStore`, `UsePermissionStore<T>()` com cache |
-| 🪪 Entra ID | `AddEntraIdApi`, `AddEntraIdWebLogin`, `MapTecWebLogin`, credenciais `ManagedIdentityFederation`/`WorkloadIdentity`/`Certificate` |
-| 🔁 Serviços | `AddEntraIdClient`, `AddEntraIdAccessToken`, `AddEntraIdOnBehalfOf`, `CachingAccessTokenProvider` |
+| 🌐 OpenID Connect (inclui Entra ID) | `AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`, `MapTecWebLogin` |
+| 🔁 Serviços | `AddOpenIdConnectClient`, `AddOpenIdConnectAccessToken`, `AccessTokenHandler`, `CachingAccessTokenProvider` |
 | 🔑 API keys | `ApiKeyGenerator`, `AddApiKeys`, `Security:ApiKeys` |
 | 🤖 Workers | `ISecurityContext.CreateSystemPrincipalAsync`, `RunAs` |
 | 🧱 Extensão | `AddJwtBearerProvider`, `AddWebLoginProvider`, `JwtHardening` |
@@ -216,9 +216,10 @@ flowchart LR
 | [⚙️ Configuração](docs/configuracao.md) | Como registrar, todas as chaves de `Security`, recarga e validações na subida |
 | [🔐 Autorização](docs/autorizacao.md) | Como usar `[TecAuthorize]`, o que é fechado por padrão, 401 × 403 |
 | [👤 Identidade e permissões](docs/identidade-e-permissoes.md) | `ISecurityUser`, claims normalizados, fonte de permissões e cache |
-| [🏢 Tenants](docs/tenants.md) | Cadastro de tenants, vínculo com o Entra ID, cadastro em banco |
-| [🪪 Provedor Entra ID](docs/provedor-entra-id.md) | API, login web, credenciais sem segredo, multi-tenant, app registration |
-| [🔁 Chamadas entre serviços](docs/chamadas-entre-servicos.md) | Client credentials, On-Behalf-Of, `AllowedHosts`, falhas do provedor |
+| [🏢 Tenants](docs/tenants.md) | Cadastro de tenants, vínculo com os tenants dos provedores, cadastro em banco |
+| [🌐 Provedor OpenID Connect](docs/provedor-openid-connect.md) | API, login web e client credentials para Keycloak, Auth0, Okta, Entra ID, Google e Cognito |
+| [🪪 Provedor Entra ID](docs/provedor-entra-id.md) | Microsoft Entra ID via OpenID Connect: app registration, claims, multi-tenant, login web e o que não existe |
+| [🔁 Chamadas entre serviços](docs/chamadas-entre-servicos.md) | Client credentials, `AllowedHosts`, cache, circuit breaker e falhas do provedor |
 | [🔑 API keys](docs/api-keys.md) | Gerar, cadastrar, rotacionar e limitar tentativas |
 | [🤖 Workers](docs/workers.md) | Identidade de sistema, `RunAs`, filas e TEC.Cqrs fora do HTTP |
 | [🧱 Novo provedor](docs/novo-provedor.md) | Como plugar outro IdP com as mesmas garantias |
@@ -226,8 +227,10 @@ flowchart LR
 | [📈 Observabilidade](docs/observabilidade.md) | Métricas, traces, eventos de log e alertas |
 | [❌ Erros](docs/erros.md) | Códigos de `SecurityErrors`, respostas e exceções |
 | [🛡️ Segurança](docs/seguranca.md) | Modelo de ameaças, controles com os testes, limites, riscos residuais e checklist |
-| [🧪 Testes](docs/testes.md) | Testar a sua API; categorias, integração, carga, variáveis `TEC_TESTES_*`/`TEC_CARGA_*` |
+| [🧪 Testes](docs/testes.md) | Testar a sua API; categorias, carga, benchmarks, variáveis `TEC_CARGA_*` |
 | [💻 Desenvolvimento local](docs/desenvolvimento.md) | Como compilar (feed `tec-interno` por padrão, repositórios vizinhos sob demanda) e regenerar lock files |
+| [🔍 Revisão técnica](docs/revisao-tecnica.md) | Revisão de segurança, código, organização e docs (2026-10-19): achados por severidade com `arquivo:linha`, correções e melhorias sugeridas |
+| [🏛️ Decisões de arquitetura (ADRs)](docs/adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers e provedores |
 | [⚙️ CI/CD](.github/workflows/README.md) | Workflows, gatilhos, Variables e como publicar |
 
 ## ⚡ Compatibilidade
@@ -238,8 +241,8 @@ flowchart LR
 | Native AOT / trimming | ✅ `IsAotCompatible` em todos os pacotes: binding de configuração gerado em compilação, JSON do 401/403 com `JsonSerializerContext`, logs por *source generator* |
 | Sem ICU (`InvariantGlobalization`) | ✅ testado no CI (todos os formatos aceitam só ASCII) |
 | Hospedagem | Controllers, Razor Pages, Minimal APIs, gRPC, SignalR (inclusive métodos de hub), Blazor (`AuthorizeRouteView`), workers |
-| Nuvens do Entra ID | Pública, US Gov e China |
-| Sistemas | Windows, Linux e macOS; containers e Kubernetes (Workload Identity) |
+| Provedores de identidade | Qualquer servidor OpenID Connect com tokens assimétricos (RS\*/PS\*/ES\*); o `Authority` define a nuvem (inclusive as soberanas do Entra ID) |
+| Sistemas | Windows, Linux e macOS; containers e Kubernetes |
 
 ## 🛡️ Segurança
 
@@ -257,15 +260,14 @@ recusa e nenhum token, segredo ou dado pessoal vai para log, trace ou métrica.
 
 ```bash
 dotnet test --project TEC.Security.Tests -c Release --treenode-filter "/*/*/*/*[Category!=Integracao]"       # unitários
-dotnet test --project TEC.Security.Tests -c Release --treenode-filter "/*/*/*/*[Category=Integracao]"        # pula sem ambiente
 dotnet test --project TEC.Security.LoadTests -c Release --treenode-filter "/*/*/*/*[Category=Carga-CI]"      # carga rápida
 ```
 
-245 testes unitários por TFM em `TEC.Security.Tests` (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo
-constante), 2 de integração com Entra ID e Key Vault reais (`Integracao`, pulados com motivo sem as variáveis
-`TEC_TESTES_*`), 8 de carga rápida (`Carga-CI`, no PR e no release junto dos unitários), 3 `Seguranca-Pesada` e 6
-`Carga-Pesada`, estes dois grupos só sob demanda no `performance.yml` manual. Para testar a **sua** API, use o `TEC.Security.Testing`. Detalhes em
-[docs/testes.md](docs/testes.md).
+190 testes unitários por TFM em `TEC.Security.Tests` (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo
+constante), 8 de carga rápida (`Carga-CI`, no PR e no release junto dos unitários), 3 `Seguranca-Pesada` e 6
+`Carga-Pesada`, estes dois grupos só sob demanda no `performance.yml` manual. Ainda não há testes de integração com um
+provedor de identidade real (a categoria `Integracao` está reservada). Para testar a **sua** API, use o
+`TEC.Security.Testing`. Detalhes em [docs/testes.md](docs/testes.md).
 
 ## 🤝 Contribuição
 
@@ -283,4 +285,4 @@ Cada merge na `main` publica a prévia `<Version>-preview.N`; versões estáveis
 
 ## 📄 Licença
 
-[MIT](LICENSE) · Criado e mantido por **Roberto Oliveira**, equipe **Tudo em Código** · [github.com/tudoemcodigo](https://github.com/tudoemcodigo)
+[Apache 2.0](LICENSE) — consulte [NOTICE](NOTICE) para informações de atribuição. Criado e mantido por **Roberto Oliveira**, equipe **Tudo em Código** · [github.com/tudoemcodigo](https://github.com/tudoemcodigo)
