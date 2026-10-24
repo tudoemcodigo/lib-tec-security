@@ -31,9 +31,6 @@
         "resolved": "10.0.2",
         "contentHash": "LG9Yll3B5aNpxv0+D47g6LiOiKBIlodhcHdQwcYzo8VeexFLGqx5ymetmA2aBRyo9cCcWsQWrFsdbsr8LvmWDw=="
       },
-      "tec.core": {
-        "type": "Project"
-      },
       "tec.security": {
         "type": "Project",
         "dependencies": {
@@ -109,6 +106,12 @@
           "Microsoft.IdentityModel.JsonWebTokens": "8.19.2",
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
+      },
+      "TEC.Core": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "+KSoC5KdNrI9H6fMRJVE1nLBDobTVZib3/TAtZ8e59b90FF9IndZIh30gee7FGaHGvLQIacgvgmQTXUp8J40EQ=="
       }
     },
     "net8.0": {
@@ -243,9 +246,6 @@
         "type": "Transitive",
         "resolved": "10.0.2",
         "contentHash": "9Hee6iQ74pDgdRNIL6lO8Vlx2onVWd5aDnqwk4Pvo0h5FklBd7QwcQDKgxeLuhiy0o3ibzUVO0KFQe0/hPXU+Q=="
-      },
-      "tec.core": {
-        "type": "Project"
       },
       "tec.security": {
         "type": "Project",
@@ -401,6 +401,12 @@
           "Microsoft.IdentityModel.JsonWebTokens": "8.19.2",
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
+      },
+      "TEC.Core": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "+KSoC5KdNrI9H6fMRJVE1nLBDobTVZib3/TAtZ8e59b90FF9IndZIh30gee7FGaHGvLQIacgvgmQTXUp8J40EQ=="
       }
     }
   }

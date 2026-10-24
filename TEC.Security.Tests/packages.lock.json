@@ -29,6 +29,32 @@
         "resolved": "10.0.12",
         "contentHash": "2OtyTIt0/tkChr3inq9Y0c34xogxXW//68gvPzIWgKwyVR4x82RSGVSZfV+ZgG13zrKBzqjaI23wpUCfKpY2yQ=="
       },
+      "TEC.Vault.AzureKeyVault": {
+        "type": "Direct",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "/wjOXCJf4lEvgKIoqVqpMyjjRfTwmUxLCoEV9C3WxtPsda1vqtRpGW4hfMboSknmwwjDm6DBBod1ui98EoDNdg==",
+        "dependencies": {
+          "Azure.Identity": "1.21.0",
+          "Azure.Security.KeyVault.Certificates": "4.9.2",
+          "Azure.Security.KeyVault.Keys": "4.10.2",
+          "Azure.Security.KeyVault.Secrets": "4.11.2",
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1",
+          "TEC.Vault": "0.0.1"
+        }
+      },
+      "TEC.Vault.InMemory": {
+        "type": "Direct",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "s63zGhH8AZf2x6eKLA2ITOvRlJvI6177XRY2vvAA46afgjLm2Al+uC4ZapJijH+MGLu7qGM6x1MoT+aHAkhYXw==",
+        "dependencies": {
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1",
+          "TEC.Vault": "0.0.1"
+        }
+      },
       "TUnit": {
         "type": "Direct",
         "requested": "[1.74.0, )",
@@ -227,9 +253,6 @@
           "TUnit.Core": "1.74.0"
         }
       },
-      "tec.core": {
-        "type": "Project"
-      },
       "tec.security": {
         "type": "Project",
         "dependencies": {
@@ -258,29 +281,6 @@
         "type": "Project",
         "dependencies": {
           "TEC.Security.AspNetCore": "[0.0.1, )"
-        }
-      },
-      "tec.vault": {
-        "type": "Project",
-        "dependencies": {
-          "Polly.Core": "[8.8.0, )",
-          "TEC.Core": "[0.0.1, )"
-        }
-      },
-      "tec.vault.azurekeyvault": {
-        "type": "Project",
-        "dependencies": {
-          "Azure.Identity": "[1.21.0, )",
-          "Azure.Security.KeyVault.Certificates": "[4.9.2, )",
-          "Azure.Security.KeyVault.Keys": "[4.10.2, )",
-          "Azure.Security.KeyVault.Secrets": "[4.11.2, )",
-          "TEC.Vault": "[0.0.1, )"
-        }
-      },
-      "tec.vault.inmemory": {
-        "type": "Project",
-        "dependencies": {
-          "TEC.Vault": "[0.0.1, )"
         }
       },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
@@ -369,6 +369,22 @@
           "Microsoft.IdentityModel.JsonWebTokens": "8.19.2",
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
+      },
+      "TEC.Core": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "+KSoC5KdNrI9H6fMRJVE1nLBDobTVZib3/TAtZ8e59b90FF9IndZIh30gee7FGaHGvLQIacgvgmQTXUp8J40EQ=="
+      },
+      "TEC.Vault": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "4r41dGxSuFURuzN0Tx4YLFULVeq0YoEw6PlIx+o1QdTM6m6wSFSObs2X+R5XFpPmapV7kUkZ8noIutGIKkYGyQ==",
+        "dependencies": {
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1"
+        }
       }
     },
     "net8.0": {
@@ -410,6 +426,42 @@
           "Microsoft.Extensions.Configuration.Json": "10.0.12",
           "Microsoft.Extensions.FileProviders.Abstractions": "10.0.12",
           "Microsoft.Extensions.FileProviders.Physical": "10.0.12"
+        }
+      },
+      "TEC.Vault.AzureKeyVault": {
+        "type": "Direct",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "/wjOXCJf4lEvgKIoqVqpMyjjRfTwmUxLCoEV9C3WxtPsda1vqtRpGW4hfMboSknmwwjDm6DBBod1ui98EoDNdg==",
+        "dependencies": {
+          "Azure.Identity": "1.21.0",
+          "Azure.Security.KeyVault.Certificates": "4.9.2",
+          "Azure.Security.KeyVault.Keys": "4.10.2",
+          "Azure.Security.KeyVault.Secrets": "4.11.2",
+          "Microsoft.Extensions.Caching.Memory": "10.0.12",
+          "Microsoft.Extensions.Configuration": "10.0.12",
+          "Microsoft.Extensions.Diagnostics.HealthChecks": "10.0.12",
+          "Microsoft.Extensions.Hosting.Abstractions": "10.0.12",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.12",
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1",
+          "TEC.Vault": "0.0.1"
+        }
+      },
+      "TEC.Vault.InMemory": {
+        "type": "Direct",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "s63zGhH8AZf2x6eKLA2ITOvRlJvI6177XRY2vvAA46afgjLm2Al+uC4ZapJijH+MGLu7qGM6x1MoT+aHAkhYXw==",
+        "dependencies": {
+          "Microsoft.Extensions.Caching.Memory": "10.0.12",
+          "Microsoft.Extensions.Configuration": "10.0.12",
+          "Microsoft.Extensions.Diagnostics.HealthChecks": "10.0.12",
+          "Microsoft.Extensions.Hosting.Abstractions": "10.0.12",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.12",
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1",
+          "TEC.Vault": "0.0.1"
         }
       },
       "TUnit": {
@@ -802,9 +854,6 @@
           "TUnit.Core": "1.74.0"
         }
       },
-      "tec.core": {
-        "type": "Project"
-      },
       "tec.security": {
         "type": "Project",
         "dependencies": {
@@ -839,35 +888,6 @@
         "type": "Project",
         "dependencies": {
           "TEC.Security.AspNetCore": "[0.0.1, )"
-        }
-      },
-      "tec.vault": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Extensions.Caching.Memory": "[10.0.12, )",
-          "Microsoft.Extensions.Configuration": "[10.0.12, )",
-          "Microsoft.Extensions.Diagnostics.HealthChecks": "[10.0.12, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[10.0.12, )",
-          "Polly.Core": "[8.8.0, )",
-          "TEC.Core": "[0.0.1, )"
-        }
-      },
-      "tec.vault.azurekeyvault": {
-        "type": "Project",
-        "dependencies": {
-          "Azure.Identity": "[1.21.0, )",
-          "Azure.Security.KeyVault.Certificates": "[4.9.2, )",
-          "Azure.Security.KeyVault.Keys": "[4.10.2, )",
-          "Azure.Security.KeyVault.Secrets": "[4.11.2, )",
-          "Microsoft.Extensions.Hosting.Abstractions": "[10.0.12, )",
-          "TEC.Vault": "[0.0.1, )"
-        }
-      },
-      "tec.vault.inmemory": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Extensions.Hosting.Abstractions": "[10.0.12, )",
-          "TEC.Vault": "[0.0.1, )"
         }
       },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
@@ -1028,6 +1048,27 @@
         "dependencies": {
           "Microsoft.IdentityModel.JsonWebTokens": "8.19.2",
           "Microsoft.IdentityModel.Tokens": "8.19.2"
+        }
+      },
+      "TEC.Core": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "+KSoC5KdNrI9H6fMRJVE1nLBDobTVZib3/TAtZ8e59b90FF9IndZIh30gee7FGaHGvLQIacgvgmQTXUp8J40EQ=="
+      },
+      "TEC.Vault": {
+        "type": "CentralTransitive",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "4r41dGxSuFURuzN0Tx4YLFULVeq0YoEw6PlIx+o1QdTM6m6wSFSObs2X+R5XFpPmapV7kUkZ8noIutGIKkYGyQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Caching.Memory": "10.0.12",
+          "Microsoft.Extensions.Configuration": "10.0.12",
+          "Microsoft.Extensions.Diagnostics.HealthChecks": "10.0.12",
+          "Microsoft.Extensions.Hosting.Abstractions": "10.0.12",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.12",
+          "Polly.Core": "8.8.0",
+          "TEC.Core": "0.0.1"
         }
       }
     }
