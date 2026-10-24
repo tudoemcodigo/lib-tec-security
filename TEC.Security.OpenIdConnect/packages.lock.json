@@ -27,7 +27,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "4r41dGxSuFURuzN0Tx4YLFULVeq0YoEw6PlIx+o1QdTM6m6wSFSObs2X+R5XFpPmapV7kUkZ8noIutGIKkYGyQ==",
+        "contentHash": "HetUn+UEQXgyeOIhwbuHRZ0UYN8yTCrovM7lBWEe4k4t/JXb9nM73mAUVyPFC4y0uFvL4iTm71wscbf3nyI5+g==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Memory": "10.0.12",
           "Microsoft.Extensions.Configuration": "10.0.12",
@@ -350,7 +350,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "4r41dGxSuFURuzN0Tx4YLFULVeq0YoEw6PlIx+o1QdTM6m6wSFSObs2X+R5XFpPmapV7kUkZ8noIutGIKkYGyQ==",
+        "contentHash": "HetUn+UEQXgyeOIhwbuHRZ0UYN8yTCrovM7lBWEe4k4t/JXb9nM73mAUVyPFC4y0uFvL4iTm71wscbf3nyI5+g==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Memory": "10.0.12",
           "Microsoft.Extensions.Configuration": "10.0.12",
