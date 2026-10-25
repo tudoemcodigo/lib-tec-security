@@ -33,7 +33,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "G/rjdjFc4MpzOM90hGy7ohClpJzTPhW+LwZY8ZlargQcH90Sta+S2SnB9myr0Mnqcrc+IxCfPt4VQH0u4wG1IQ==",
+        "contentHash": "HPEUaYaVBczUzV+ew8dJotaei3mZxIzFHtWmYR//AMnE1Q1kKD2nDENhPGdR/cXu+KRXI2+DF5azRh8F9PAXow==",
         "dependencies": {
           "Azure.Identity": "1.21.0",
           "Azure.Security.KeyVault.Certificates": "4.9.2",
@@ -48,7 +48,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "XlbkJ7IqG8KurgKqDpvWD9synDPaygCK58tyWsqmQVJCVK7z9t5x7w+rThAJfslEskqlFI1RkunoftnMN8rBzg==",
+        "contentHash": "UXcaD7PZP4B6yfqi9srpnk/DdyO8FL9tcD4sqGQIC5mx7I2JZrooNAivk78JZxmFLC7s9UA4PqH0VBrKm++azA==",
         "dependencies": {
           "Polly.Core": "8.8.0",
           "TEC.Core": "0.0.1",
@@ -374,13 +374,13 @@
         "type": "CentralTransitive",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "Iq96VEtDafQN75ZX58L0cqqGIsvN0R7u7t9gYQKYv0JXpXmo+AE4c0i1He1dENsOSwCt2t7Z7on28infVRUhHQ=="
+        "contentHash": "L9gbO8YRbv9EY0e7FyMho3Mkodq8SwBxfPk68B4QQ401PZSOeGy7V0X7IHI8o48qAbaBcJiaOa3DTdHDZn7g9A=="
       },
       "TEC.Vault": {
         "type": "CentralTransitive",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "clJKbF0jibpObZv23ydbhNs6DKUv2YpatX2/NYsTjQXv2IpTqoJvmcBoiNWqtRlJEhgKoYABZSTcggSQK3GKXw==",
+        "contentHash": "DWUU7d8tZmcyAi/HwI9tTWV5v4VHKN8gPLHFc5E7MojN9gX/0pQRHV2gGsaQwv87+Y6tZ3ugPS4x5LVKnSzs5A==",
         "dependencies": {
           "Polly.Core": "8.8.0",
           "TEC.Core": "0.0.1"
@@ -432,7 +432,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "G/rjdjFc4MpzOM90hGy7ohClpJzTPhW+LwZY8ZlargQcH90Sta+S2SnB9myr0Mnqcrc+IxCfPt4VQH0u4wG1IQ==",
+        "contentHash": "HPEUaYaVBczUzV+ew8dJotaei3mZxIzFHtWmYR//AMnE1Q1kKD2nDENhPGdR/cXu+KRXI2+DF5azRh8F9PAXow==",
         "dependencies": {
           "Azure.Identity": "1.21.0",
           "Azure.Security.KeyVault.Certificates": "4.9.2",
@@ -452,7 +452,7 @@
         "type": "Direct",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "XlbkJ7IqG8KurgKqDpvWD9synDPaygCK58tyWsqmQVJCVK7z9t5x7w+rThAJfslEskqlFI1RkunoftnMN8rBzg==",
+        "contentHash": "UXcaD7PZP4B6yfqi9srpnk/DdyO8FL9tcD4sqGQIC5mx7I2JZrooNAivk78JZxmFLC7s9UA4PqH0VBrKm++azA==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Memory": "10.0.12",
           "Microsoft.Extensions.Configuration": "10.0.12",
@@ -1054,13 +1054,13 @@
         "type": "CentralTransitive",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "Iq96VEtDafQN75ZX58L0cqqGIsvN0R7u7t9gYQKYv0JXpXmo+AE4c0i1He1dENsOSwCt2t7Z7on28infVRUhHQ=="
+        "contentHash": "L9gbO8YRbv9EY0e7FyMho3Mkodq8SwBxfPk68B4QQ401PZSOeGy7V0X7IHI8o48qAbaBcJiaOa3DTdHDZn7g9A=="
       },
       "TEC.Vault": {
         "type": "CentralTransitive",
         "requested": "[0.0.1, )",
         "resolved": "0.0.1",
-        "contentHash": "clJKbF0jibpObZv23ydbhNs6DKUv2YpatX2/NYsTjQXv2IpTqoJvmcBoiNWqtRlJEhgKoYABZSTcggSQK3GKXw==",
+        "contentHash": "DWUU7d8tZmcyAi/HwI9tTWV5v4VHKN8gPLHFc5E7MojN9gX/0pQRHV2gGsaQwv87+Y6tZ3ugPS4x5LVKnSzs5A==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Memory": "10.0.12",
           "Microsoft.Extensions.Configuration": "10.0.12",
