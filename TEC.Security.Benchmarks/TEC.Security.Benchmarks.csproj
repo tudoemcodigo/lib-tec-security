@@ -20,8 +20,7 @@
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
 
-  <!-- Pipeline HTTP completo em memória (TestServer), na versão do ASP.NET Core de cada runtime -->
-  <!-- Versão por runtime (8.0.x no net8.0, 10.0.x no net10.0) definida no Directory.Packages.props -->
+  <!-- Pipeline HTTP completo em memória (TestServer), na versão do ASP.NET Core do alvo (10.0.x, Directory.Packages.props) -->
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
   </ItemGroup>

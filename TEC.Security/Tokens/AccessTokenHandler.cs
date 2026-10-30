@@ -107,7 +107,7 @@ public sealed class AccessTokenHandlerOptions
 /// <see cref="IAccessTokenProvider"/>, somente para os hosts permitidos e com HTTPS.
 /// </summary>
 /// <remarks>
-/// <para>Registrado pelos pacotes de provedor (ex.: <c>AddEntraIdAccessToken</c> no <c>IHttpClientBuilder</c>).</para>
+/// <para>Registrado pelos pacotes de provedor (ex.: <c>AddOpenIdConnectAccessToken</c> no <c>IHttpClientBuilder</c>).</para>
 /// <para>Um header <c>Authorization</c> já presente na requisição é mantido (o handler não sobrescreve).</para>
 /// <para>Redirecionamentos: o <see cref="HttpClientHandler"/> remove o header <c>Authorization</c> ao seguir um redirect, então
 /// o token não acompanha um 302 para outro domínio.</para>

@@ -86,6 +86,7 @@ public class SecurityIssueRegressionTests
         var claims = new[]
         {
             new Claim("sub", "user-123"),
+            new Claim("sid", "sessao-1"),
             new Claim("iss", "https://auth.empresa.com/realms/corp")
         };
 
@@ -164,6 +165,7 @@ public class SecurityIssueRegressionTests
         var claims = new[]
         {
             new Claim("sub", "user-123"),
+            new Claim("sid", "sessao-1"),
             new Claim("resource_access", resourceAccessJson)
         };
 
@@ -173,15 +175,18 @@ public class SecurityIssueRegressionTests
         await Assert.That(identity!.Roles).DoesNotContain("admin-financeiro");
     }
 
-    // Issue #9: Classificação User vs Application determinística
+    // Issue #9: Classificação User vs Application por regras do esquema, nunca pelo preferred_username
     [Test]
     public async Task Issue9_Classification_Keycloak_M2M_Is_Application()
     {
         var options = new OpenIdConnectApiOptions { Authority = "https://auth.empresa.com", Audience = "api" };
+        options.Kind.ApplicationClaims.Add("client_id=*");   // receita do Keycloak: o mapper da conta de serviço emite client_id
 
         var m2mClaims = new[]
         {
-            new Claim("sub", "client-123"),
+            new Claim("sub", "6d4c2a8e-0000-0000-0000-000000000001"),
+            new Claim("azp", "minha-app"),
+            new Claim("client_id", "minha-app"),
             new Claim("preferred_username", "service-account-minha-app"),
             new Claim("realm_access", """{"roles": ["default-roles-corp"]}""")
         };
@@ -193,6 +198,7 @@ public class SecurityIssueRegressionTests
         var userClaims = new[]
         {
             new Claim("sub", "auth0|999"),
+            new Claim("sid", "sessao-1"),
             new Claim("scope", "read:messages")
         };
 
@@ -263,6 +269,7 @@ public class SecurityIssueRegressionTests
         var claims = new[]
         {
             new Claim("sub", "user-1"),
+            new Claim("sid", "sessao-1"),
             new Claim("tenant", "invalido"),
             new Claim("custom_tenant", "correto"),
             new Claim("role", "role-invalida"),

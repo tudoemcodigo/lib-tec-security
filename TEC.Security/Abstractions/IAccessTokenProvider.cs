@@ -18,7 +18,7 @@ public sealed class AccessToken(string token, DateTimeOffset expiresOn)
 
 /// <summary>
 /// Obtém tokens de acesso da própria aplicação (client credentials, identidade gerenciada) para chamar outros serviços.
-/// Implementado pelos pacotes de provedor (ex.: <c>TEC.Security.EntraId</c>) e usado pelo <c>AccessTokenHandler</c> do
+/// Implementado pelos pacotes de provedor (ex.: <c>TEC.Security.OpenIdConnect</c>) e usado pelo <c>AccessTokenHandler</c> do
 /// <c>HttpClient</c>.
 /// </summary>
 public interface IAccessTokenProvider

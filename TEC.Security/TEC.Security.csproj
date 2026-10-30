@@ -25,4 +25,13 @@
     <TecReference Include="TEC.Core" />
   </ItemGroup>
 
+  <!--
+    O login web do TEC.Security.AspNetCore reconstrói a identidade normalizada lida do próprio cookie de sessão
+    (NormalizedIdentity.RestoreTrusted). O tipo é interno de propósito: fora dos pacotes TEC.Security, só o
+    SecurityIdentityFactory cria identidade normalizada. Os quatro pacotes saem sempre na mesma versão.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="TEC.Security.AspNetCore" />
+  </ItemGroup>
+
 </Project>

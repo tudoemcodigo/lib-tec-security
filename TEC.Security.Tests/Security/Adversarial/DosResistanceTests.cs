@@ -35,7 +35,7 @@ public class DosResistanceTests
     [Arguments("authorization-1mb")]
     [Arguments("bearer-1mb")]
     [Arguments("api-key-1mb")]
-    [Arguments("hub-query-60kb")]   // abaixo do limite de tamanho de Uri do .NET 8 (65 519) e bem acima do MaxTokenLength
+    [Arguments("hub-query-60kb")]   // abaixo do limite histórico de tamanho de Uri do .NET (65 519) e bem acima do MaxTokenLength
     [Arguments("api-key-1000-headers")]
     [Arguments("authorization-1000-headers")]
     public async Task Http_GiantOrRepeatedCredentials_Rejected401Fast(string scenario)

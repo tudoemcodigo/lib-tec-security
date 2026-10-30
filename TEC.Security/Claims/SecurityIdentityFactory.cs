@@ -14,7 +14,8 @@ namespace TEC.Security.Claims;
 /// <summary>
 /// Converte a identidade validada por um provedor (<see cref="ExternalIdentity"/>) no principal normalizado do TEC.Security:
 /// tenant resolvido pelo cadastro, papéis/escopos/permissões validados e claims <c>tec_*</c> do provedor descartados.
-/// Singleton, usado pelos pacotes de provedor (Entra ID, API key...).
+/// Singleton, usado pelos pacotes de provedor (OpenID Connect, API key...). Só ela cria a identidade que o
+/// <see cref="SecurityUser"/> reconhece como normalizada.
 /// </summary>
 /// <remarks>
 /// <para>Falha fechada, sem exceção: identidade incompleta, tenant desconhecido/inativo (com <see cref="SecurityOptions.RequireTenant"/>
@@ -29,6 +30,7 @@ public sealed class SecurityIdentityFactory
     private readonly IPermissionStore _permissions;
     private readonly IOptionsMonitor<SecurityOptions> _options;
     private readonly ILogger _logger;
+    private int _rolesAsPermissionsWarned;
 
     /// <summary>Cria a fábrica.</summary>
     public SecurityIdentityFactory(ITenantRegistry tenants, IPermissionStore permissions, IOptionsMonitor<SecurityOptions> options,
@@ -63,7 +65,12 @@ public sealed class SecurityIdentityFactory
     /// externo e as permissões são consultadas de novo. Usado para que uma sessão longa reflita tenant desativado e permissões
     /// revogadas.
     /// </summary>
-    /// <remarks>Somente identidades de usuário e aplicação; permissões concedidas diretamente (API key) não são preservadas.</remarks>
+    /// <remarks>
+    /// Somente identidades de usuário e aplicação; permissões concedidas diretamente (API key) não são preservadas. O indicador
+    /// multi-tenant (<see cref="TecClaimTypes.MultiTenant"/>) é preservado, então o padrão de
+    /// <see cref="SecurityOptions.RolesAsPermissions"/> continua o mesmo do login. Principal que não foi criado por esta fábrica
+    /// é recusado.
+    /// </remarks>
     public Task<Result<ClaimsPrincipal>> RevalidateAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -82,6 +89,7 @@ public sealed class SecurityIdentityFactory
             ExternalTenantId = user.ExternalTenantId,
             Name = user.Name,
             ClientId = user.ClientId,
+            MultiTenant = identity.HasClaim(TecClaimTypes.MultiTenant, TecClaimTypes.MultiTenantValue),
             Roles = [.. user.Roles],
             Scopes = [.. user.Scopes],
             SourceClaims = [.. identity.Claims.Where(c => !TecClaimTypes.IsReserved(c.Type))]
@@ -150,10 +158,9 @@ public sealed class SecurityIdentityFactory
         IEnumerable<string> candidates = identity.Permissions.Concat(stored ?? []);
         bool effectiveRolesAsPermissions = options.RolesAsPermissions ?? !identity.MultiTenant;
 
-        if (options.RolesAsPermissions == true && identity.MultiTenant)
-        {
+        // Um aviso por processo: a cada autenticação (e revalidação) inundaria o log com a mesma decisão de configuração
+        if (options.RolesAsPermissions == true && identity.MultiTenant && Interlocked.Exchange(ref _rolesAsPermissionsWarned, 1) == 0)
             SecurityLog.RolesAsPermissionsInMultiTenant(_logger);
-        }
 
         if (effectiveRolesAsPermissions)
             candidates = candidates.Concat(roles);
@@ -162,37 +169,40 @@ public sealed class SecurityIdentityFactory
             return Fail(identity, "quantidade de permissões acima do limite", SecurityErrors.Unauthenticated());
 
         // ---------- Identidade normalizada ----------
-        var claims = new ClaimsIdentity(identity.Scheme, TecClaimTypes.Name, TecClaimTypes.Role);
+        var claims = new List<Claim>();
 
         foreach (var claim in identity.SourceClaims)
         {
             if (claim is not null && !TecClaimTypes.IsReserved(claim.Type))
-                claims.AddClaim(new Claim(claim.Type, claim.Value, claim.ValueType, claim.Issuer, claim.OriginalIssuer));
+                claims.Add(new Claim(claim.Type, claim.Value, claim.ValueType, claim.Issuer, claim.OriginalIssuer));
         }
 
-        claims.AddClaim(new Claim(TecClaimTypes.Normalized, TecClaimTypes.NormalizedValue));
-        claims.AddClaim(new Claim(TecClaimTypes.UserId, identity.UserId));
-        claims.AddClaim(new Claim(TecClaimTypes.Kind, identity.Kind.ToString()));
-        claims.AddClaim(new Claim(TecClaimTypes.Scheme, identity.Scheme));
-        claims.AddClaim(new Claim(TecClaimTypes.Provider, identity.Provider));
+        claims.Add(new Claim(TecClaimTypes.Normalized, TecClaimTypes.NormalizedValue));
+        claims.Add(new Claim(TecClaimTypes.UserId, identity.UserId));
+        claims.Add(new Claim(TecClaimTypes.Kind, identity.Kind.ToString()));
+        claims.Add(new Claim(TecClaimTypes.Scheme, identity.Scheme));
+        claims.Add(new Claim(TecClaimTypes.Provider, identity.Provider));
 
+        if (identity.MultiTenant)
+            claims.Add(new Claim(TecClaimTypes.MultiTenant, TecClaimTypes.MultiTenantValue));
         if (tenant is not null)
-            claims.AddClaim(new Claim(TecClaimTypes.TenantId, tenant.Id));
+            claims.Add(new Claim(TecClaimTypes.TenantId, tenant.Id));
         if (SecurityRules.IsValidUserId(identity.ExternalTenantId))
-            claims.AddClaim(new Claim(TecClaimTypes.ExternalTenantId, identity.ExternalTenantId!));
+            claims.Add(new Claim(TecClaimTypes.ExternalTenantId, identity.ExternalTenantId!));
         if (SecurityRules.IsValidUserId(identity.ClientId))
-            claims.AddClaim(new Claim(TecClaimTypes.ClientId, identity.ClientId!));
+            claims.Add(new Claim(TecClaimTypes.ClientId, identity.ClientId!));
         if (SecurityRules.SanitizeDisplayName(identity.Name) is { } name)
-            claims.AddClaim(new Claim(TecClaimTypes.Name, name));
+            claims.Add(new Claim(TecClaimTypes.Name, name));
 
         foreach (string role in roles)
-            claims.AddClaim(new Claim(TecClaimTypes.Role, role));
+            claims.Add(new Claim(TecClaimTypes.Role, role));
         foreach (string scope in scopes)
-            claims.AddClaim(new Claim(TecClaimTypes.Scope, scope));
+            claims.Add(new Claim(TecClaimTypes.Scope, scope));
         foreach (string permission in permissions)
-            claims.AddClaim(new Claim(TecClaimTypes.Permission, permission));
+            claims.Add(new Claim(TecClaimTypes.Permission, permission));
 
-        return new ClaimsPrincipal(claims);
+        // O tipo interno é a prova da normalização (SecurityUser.FindNormalizedIdentity): só esta fábrica o cria
+        return new ClaimsPrincipal(new NormalizedIdentity(claims, identity.Scheme));
     }
 
     /// <summary>Distintos e no formato; fora do formato são descartados (log com a quantidade). <c>false</c> acima do limite.</summary>

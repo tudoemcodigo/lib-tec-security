@@ -104,7 +104,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
         o.ClientId = "servico-faturamento";
         o.ClientSecretName = "segredo-faturamento";                // lido do TEC.Vault
     }));
-builder.Services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<OpenIdConnectAccessTokenProvider>());   // veja o aviso em Chamadas entre serviços
+// O AddOpenIdConnectClient já registra o IAccessTokenProvider (Singleton)
 ```
 
 Só o pacote `TEC.Security` é necessário para usar `ISecurityContext`, `ISecurityUser` e o cadastro de tenants. O
@@ -144,7 +144,8 @@ API key é guardada como hash.
         "RequireHttpsMetadata": true,
         "TenantClaim": null,
         "RoleClaimType": "roles",
-        "NameClaimType": "preferred_username"
+        "NameClaimType": "preferred_username",
+        "Kind": { "Unresolved": "Reject" }
       }
     },
 
@@ -189,7 +190,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
         o.ClientId = "<client-id-do-site>";
         o.ClientSecretName = "<nome-do-segredo-no-cofre>";
     })
-    .AddOpenIdConnectClient(o =>                                // só em código
+    .AddOpenIdConnectClient(o =>                                // só em código; validado na subida
     {
         o.TokenEndpoint = "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token";
         o.ClientId = "<client-id-desta-aplicacao>";
@@ -202,6 +203,9 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 > A seção `Security:OpenIdConnect:Api` é só uma sugestão de organização: `AddOpenIdConnectApi` recebe a seção que você
 > passar. O login web e o cliente de chamadas entre serviços são configurados em código (`Action<...Options>`). `Security`,
 > `Security:Tenants`, `Security:Permissions` e `Security:ApiKeys` são fixas (constantes `SectionName` de cada classe de opções).
+> A subseção `Kind` decide se cada token é de usuário ou de aplicação; o padrão (`Reject`) recusa o token que nenhuma regra
+> reconhece. Com a `Authority` do Entra ID os padrões bastam; Keycloak e Auth0 pedem uma regra
+> ([🌐 Provedor OpenID Connect](provedor-openid-connect.md)).
 
 ### Recarga sem reinício
 
@@ -259,7 +263,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 | Chave | Padrão | Descrição |
 |---|---|---|
 | `RequireTenant` | `false` | Toda identidade (exceto sistema) precisa de tenant cadastrado e ativo; sem tenant → 401 |
-| `RolesAsPermissions` | não definido (`bool?`) | Os próprios papéis contam como permissões (somados aos do `IPermissionStore`). Não definido: `true` (o `SecurityIdentityFactory` usa `RolesAsPermissions ?? true`). Em APIs multi-tenant defina `false` explicitamente |
+| `RolesAsPermissions` | não definido (`bool?`) | Os próprios papéis contam como permissões (somados aos do `IPermissionStore`). Não definido: `true`, exceto para identidades de um provedor multi-tenant (`MultiTenant = true`), em que vale `false`, também depois da revalidação da sessão. Defina o valor para fixar o comportamento; `true` com identidade multi-tenant gera o aviso 3403 (uma vez por processo) |
 
 As demais seções têm a página própria: `Security:Tenants` em [🏢 Tenants](tenants.md#️-opções), `Security:Permissions` em
 [👤 Identidade e permissões](identidade-e-permissoes.md#️-opções) e `Security:ApiKeys` em [🔑 API keys](api-keys.md#️-opções).
@@ -281,6 +285,10 @@ por um `IHostedService` na subida: o erro aparece na inicialização, não na pr
 | `InvalidOperationException` | Cadastro de tenants inválido na subida (id fora do formato, ids que diferem só por maiúsculas, tenant vazio, provedor ou id externo fora do formato, o mesmo id externo em dois tenants) | Corrija `Security:Tenants` |
 | `OptionsValidationException` | Cadastro de API keys inválido (`HeaderName` fora do formato ou `Authorization`, id fora do formato, `Hash` ausente ou não canônico, `ExpiresOn` ausente, `TenantId`/papel/permissão fora do formato) | Corrija `Security:ApiKeys` |
 | `OptionsValidationException` | Um provedor, `Configure` ou `PostConfigure` desligou um controle obrigatório do JWT, do OIDC ou do cookie ([🛡️ Segurança](seguranca.md#controles-obrigatórios-conferidos-na-subida)) | Remova o ajuste: os controles não podem ser desligados |
+| `InvalidOperationException` | `AddOpenIdConnectApi` com regra de `Kind` inválida: fora de `claim=valor`, sobre claim editável (`preferred_username`, `email`, `name`...) ou reservado (`tec_*`), ou `Kind:Unresolved`/`Kind:*` booleano com valor inválido | Corrija as regras ([🌐 Provedor OpenID Connect](provedor-openid-connect.md)) |
+| `InvalidOperationException` | Login web com `ClientSecretName` sem `ISecretReader` registrado, ou com o segredo ausente no cofre | Registre o TEC.Vault e confira o nome do segredo |
+| `InvalidOperationException` | `AddOpenIdConnectClient` chamado duas vezes | Registre um único cliente M2M |
+| `OptionsValidationException` | Opções do `AddOpenIdConnectClient` inválidas ou inseguras (sem `ClientId`, sem endpoint, HTTP fora de loopback, sem segredo, `ClientSecretName` sem `ISecretReader`, `Timeout` fora de 0 a 5 min, `PrivateKeyJwt`) | Corrija o cliente ([🔁 Chamadas entre serviços](chamadas-entre-servicos.md)) |
 | `InvalidOperationException` | `[TecAuthorize]` vazio, fora do formato ou junto com `[AllowAnonymous]` | Corrija o endpoint ([🔐 Autorização](autorizacao.md#-erros)) |
 | `InvalidOperationException` | `AddTestJwt` fora de Development, Testing e Test | Use o provedor de teste só nos testes ([🧪 Testes](testes.md#testando-a-sua-api)) |
 
@@ -298,7 +306,8 @@ Mensagens de erro nunca repetem segredos, hashes ou ids externos.
 - `ApiKeyRequiresHttps = false` só faz sentido atrás de um proxy que já exige HTTPS; prefira `UseForwardedHeaders`.
 - `HubPaths` aceita o token na query string, que costuma aparecer em logs de acesso: liste só os hubs reais e mascare
   `access_token` nos logs do proxy.
-- Em APIs multi-tenant defina `RolesAsPermissions: false` e use permissões por tenant ([🏢 Tenants](tenants.md#️-segurança)).
+- Em APIs multi-tenant mantenha `RolesAsPermissions` em `false` (o padrão com `MultiTenant = true`) e use permissões por
+  tenant ([🏢 Tenants](tenants.md#️-segurança)).
 
 ---
 

@@ -129,7 +129,7 @@ public class LeakageTests
         options.Keys[disabled.KeyId] = new ApiKeyDefinition { Hash = disabled.Hash, Enabled = false, ExpiresOn = DateTimeOffset.UtcNow.AddDays(1) };
         var validator = new ApiKeyValidator(new TestOptionsMonitor<ApiKeyOptions>(options), logger: factory.CreateLogger<ApiKeyValidator>());
 
-        string[] presented = [key.Key[..^1] + (key.Key[^1] == 'A' ? 'B' : 'A'), disabled.Key, ApiKeyGenerator.Generate("outra").Key, Secret, "tec_" + Secret + "_x"];
+        string[] presented = [WrongSecret(key.Key), disabled.Key, ApiKeyGenerator.Generate("outra").Key, Secret, "tec_" + Secret + "_x"];
         foreach (string value in presented)
             await Assert.That(validator.Validate(value)).IsNull();
 
@@ -234,6 +234,20 @@ public class LeakageTests
 
         await Assert.That(result.IsFailure).IsTrue();
         await Assert.That(logs.All).DoesNotContain(Secret);
+    }
+
+    /// <summary>
+    /// Mesma chave com um caractere do meio do segredo trocado: continua Base64Url canônico (só o último caractere tem bits de
+    /// preenchimento) e é sempre diferente da original, então a recusa é por segredo incorreto, nunca por formato.
+    /// </summary>
+    internal static string WrongSecret(string key)
+    {
+        int position = key.Length - 20;   // dentro do segredo (os 43 caracteres finais), longe do último
+        char replacement = key[position] == 'A' ? 'B' : 'A';
+        string tampered = key[..position] + replacement + key[(position + 1)..];
+        return tampered != key && ApiKeyGenerator.TryParse(tampered, out _, out _)
+            ? tampered
+            : throw new InvalidOperationException("Chave alterada inválida: o teste precisa de um segredo canônico e diferente.");
     }
 
     private static HttpRequestMessage Bearer(string path, string token)

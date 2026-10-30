@@ -65,10 +65,12 @@ TEC.Cqrs.AspNetCore), `Cache-Control: no-store` e `traceId` (da `Activity` atual
 |---|:---:|---|---|
 | Sem credencial em endpoint protegido | 401 | `SEGURANCA_NAO_AUTENTICADO` | — |
 | Token inválido (assinatura, emissor, audiência, validade, tamanho) | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3201 (tipo) |
+| Token recusado pelo provedor OpenID Connect (tipo da identidade indeterminado ou ambíguo, tenant não cadastrado, inativo ou fora do formato) | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3201 (motivo, sem valores do token) |
+| Delegate de evento aprovando sem validação ou trocando o token ou o principal validados | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3201 (bearer) / 3207 (login web) |
 | Credencial não reconhecida (Basic, emissor desconhecido, malformado, dois headers) | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3202 |
 | API key recusada | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3110 / 3202 |
 | Identidade recusada pela normalização (tenant, limites, store) | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3001 / 3003 |
-| Login web recusado | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3207 / 3402 |
+| Login web recusado | 401 | `SEGURANCA_NAO_AUTENTICADO` | 3207 |
 | Sem permissão, papel, escopo, tipo ou esquema | 403 | `SEGURANCA_ACESSO_NEGADO` | 3203 (auditoria) |
 | Identidade sem normalização do TEC.Security | 403 | `SEGURANCA_ACESSO_NEGADO` | 3204 |
 | Logout de outra origem | 403 | — (sem corpo) | — |
@@ -137,13 +139,16 @@ aparecem só em Development (`JwtBearerOptions.IncludeErrorDetails`, ligado pelo
 
 | Exceção | Lançada por | Quando |
 |---|---|---|
-| `InvalidOperationException` | Registro e subida | Configuração insegura ou inválida ([⚙️ Configuração](configuracao.md#-erros)); `AddTecSecurity`, `AddAspNetCore`, `AddApiKeys`, `AddEntraIdClient`, `UsePermissionStore` ou `UseTenantRegistry` repetidos; provedor sem `AddAspNetCore` |
-| `OptionsValidationException` | Subida | Cadastro de API keys inválido; controle obrigatório do JWT, OIDC ou cookie desligado |
+| `InvalidOperationException` | Registro e subida | Configuração insegura ou inválida ([⚙️ Configuração](configuracao.md#-erros)); `AddTecSecurity`, `AddAspNetCore`, `AddApiKeys`, `UsePermissionStore`, `UseTenantRegistry` ou `AddOpenIdConnectClient` repetidos; provedor sem `AddAspNetCore`; regra de `Kind` do provedor OpenID Connect fora do formato ou sobre claim editável; segredo do login web (`ClientSecretName`) inexistente no cofre ou sem `ISecretReader` |
+| `OptionsValidationException` | Subida | Cadastro de API keys inválido; controle obrigatório do JWT, OIDC ou cookie desligado; opções do cliente M2M (`OpenIdConnectClientOptions`) inválidas, inclusive `AuthType = PrivateKeyJwt` |
 | `InvalidOperationException` | `ISecurityContext.RunAs` | Principal não normalizado pelo TEC.Security |
-| `InvalidOperationException` | Credencial do Entra ID em uso | TEC.Vault ausente, item inexistente ou expirado, cofre recusou a assinatura, `AZURE_FEDERATED_TOKEN_FILE` ausente, vazio ou acima de 16 KB (nas chamadas de serviço, chega dentro de `SecurityTokenAcquisitionException`) |
+| `InvalidOperationException` | Cookie do login web (`SignInAsync`) | Identidade que não veio do `SecurityIdentityFactory`, ou que não é `User` |
+| `InvalidOperationException` | Login web, pedido de autorização por PAR | Segredo do `ClientSecretName` indisponível no cofre na hora do login (na troca do código, a mesma falha vira 401 com log 3207) |
+| `InvalidOperationException` | `OpenIdConnectAccessTokenProvider` (criação direta, fora do `AddOpenIdConnectClient`) | As mesmas regras validadas na subida; `ClientSecretName` sem `ISecretReader` |
+| `NotSupportedException` | `OpenIdConnectAccessTokenProvider` (criação direta) | `AuthType = PrivateKeyJwt` |
 | `InvalidOperationException` | `CachingAccessTokenProvider.GetTokenAsync` | Mais de 1024 conjuntos de escopos distintos |
-| `HttpRequestException` | `AccessTokenHandler`, On-Behalf-Of | Destino fora de `AllowedHosts`/sem HTTPS; On-Behalf-Of sem usuário Entra ID |
-| `SecurityTokenAcquisitionException` | `CachingAccessTokenProvider`, On-Behalf-Of | Falha ao obter token sem token válido em cache |
+| `HttpRequestException` | `AccessTokenHandler` | Destino fora de `AllowedHosts`/sem HTTPS |
+| `SecurityTokenAcquisitionException` | `CachingAccessTokenProvider` (inclusive o provedor OpenID Connect) | Falha ao obter token sem token válido em cache: segredo não encontrado no cofre, HTTP de erro ou 3xx, tempo limite, resposta acima de 256 KB, JSON inválido ou sem `access_token`, `expires_in` inválido ou circuito aberto (a causa fica em `InnerException`) |
 | `ObjectDisposedException` | `CachingAccessTokenProvider.GetTokenAsync`, `TestTokenIssuer.CreateToken` | Uso depois do `Dispose` |
 | `ArgumentException` | `ApiKeyGenerator.Generate`, `GetTokenAsync`, `AccessToken`, `SecuritySchemes`, `TestTokenIssuer`, `RequirePermission` | Id de API key, escopos, token, nome de esquema, emissor/audiência ou permissões inválidos |
 | `ArgumentOutOfRangeException` | `UsePermissionStore` | Cache fora de 0 a 1 hora |
@@ -155,9 +160,9 @@ aparecem só em Development (`JwtBearerOptions.IncludeErrorDetails`, ligado pelo
 
 | Sintoma | Como resolver |
 |---|---|
-| 401 inesperado | Veja 3201/3202/3001 no log (motivo e tipo); confira emissor, audiência, tenant no cadastro e `RequireTenant` |
+| 401 inesperado | Veja 3201/3202/3001 no log (motivo e tipo); confira emissor, audiência, tenant no cadastro e `RequireTenant`; no provedor OpenID Connect, as regras de `Kind` do esquema ([🌐 Provedor OpenID Connect](provedor-openid-connect.md#tipo-da-identidade-kind)) |
 | 403 inesperado | Veja 3203 (motivo `permission`, `role`, `scope`, `kind` ou `scheme`); confira papéis e mapeamento |
-| `SEGURANCA_PROVEDOR_INDISPONIVEL` | Veja 3003, 3120, 3401 e 3402; confira a fonte de permissões, a credencial e o cofre |
+| `SEGURANCA_PROVEDOR_INDISPONIVEL` | Veja 3003 e 3120; confira a fonte de permissões, a credencial e o cofre |
 | A aplicação não sobe | Leia a mensagem: ela aponta o esquema e a regra violada |
 
 ---

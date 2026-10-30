@@ -67,7 +67,7 @@ Cqrs, Security e Observability são independentes entre si: nenhum referencia o 
 | `AppException` | Base da `SecurityTokenAcquisitionException` (`ToResult()`, `Errors`, `Code`) |
 | `SingleFlight<TKey, TValue>` | Uma consulta por chave no cache de permissões |
 | `Base64UrlEncoder` | Segredo e hash das API keys (estrito e canônico) e chave do cache de permissões |
-| `SensitiveDataMasker.DescribeUntrusted` | Caminho da requisição na auditoria quando não há endpoint (só tamanho + HMAC) |
+| `SensitiveDataMasker.DescribeUntrusted` | Caminho da requisição na auditoria quando não há endpoint e claim de tenant recusado pelo provedor OpenID Connect (só tamanho + HMAC) |
 | `JsonDefaults` | Serialização do corpo 401/403 com metadados gerados (AOT) |
 
 ### TEC.Vault
@@ -77,7 +77,7 @@ O segredo do cliente OAuth fica no cofre, e só o **nome** vai para o código ou
 | Onde | Opção | O que sai do cofre |
 |---|---|---|
 | Chamadas entre serviços | `OpenIdConnectClientOptions.ClientSecretName` | O segredo (`ISecretReader.GetSecretAsync`), lido a cada obtenção de token |
-| Login web | `OpenIdConnectWebLoginOptions.ClientSecretName` | O segredo, lido uma vez na criação das opções do esquema (na subida) |
+| Login web | `OpenIdConnectWebLoginOptions.ClientSecretName` | O segredo, conferido na subida (precisa existir) e lido de novo a cada login, na troca do código e no pedido por PAR; acompanha a rotação sem reiniciar |
 
 ```csharp
 using TEC.Security.DependencyInjection;
@@ -150,13 +150,13 @@ valores da query string nos traces, mas confira os logs de acesso de proxies e d
 
 | Erro | Quando ocorre | O que fazer |
 |---|---|---|
-| `InvalidOperationException`: `ClientSecretName informado, mas ISecretReader não foi injetado` | `ClientSecretName` sem o TEC.Vault registrado | Registre o TEC.Vault com o provedor do cofre |
-| `InvalidOperationException`: `Segredo '<nome>' não encontrado no cofre TEC.Vault` | Item inexistente, sem permissão ou desabilitado | Confira o nome e os papéis no cofre |
+| `OptionsValidationException`: `ClientSecretName informado, mas nenhum ISecretReader (TEC.Vault) está registrado` | `ClientSecretName` sem o TEC.Vault registrado; a aplicação não sobe | Registre o TEC.Vault com o provedor do cofre |
+| `InvalidOperationException`: `Segredo '<nome>' não encontrado no cofre TEC.Vault` | Item inexistente, sem permissão ou desabilitado (nas chamadas de serviço, dentro de `SecurityTokenAcquisitionException`) | Confira o nome e os papéis no cofre |
 | 401 em `Send` do TEC.Cqrs num worker | `IPrincipalAccessor` lendo só o `HttpContext` | Veja [🤖 Workers](workers.md#teccqrs-fora-do-http) |
 | `ORM_AUDITORIA_SEM_IDENTIDADE` | Gravação auditada sem identidade (ex.: job sem `RunAs`) | Use uma identidade de sistema |
 
-Nas chamadas de serviço, as falhas de credencial chegam como `InvalidOperationException` do provedor OpenID Connect
-([🔁 Chamadas entre serviços](chamadas-entre-servicos.md#-erros)).
+Nas chamadas de serviço, as falhas de credencial chegam como `SecurityTokenAcquisitionException` com a
+`InvalidOperationException` original em `InnerException` ([🔁 Chamadas entre serviços](chamadas-entre-servicos.md#-erros)).
 
 ---
 
@@ -176,7 +176,8 @@ Nas chamadas de serviço, as falhas de credencial chegam como `InvalidOperationE
 <details>
 <summary>Preciso do TEC.Vault para usar o TEC.Security?</summary>
 
-Só o `TEC.Security.OpenIdConnect` depende dele, e só quando você usa `ClientSecretName`. O núcleo, o `TEC.Security.AspNetCore`
+Só o `TEC.Security.OpenIdConnect` depende dele. O pacote sempre traz o TEC.Vault como dependência, mas você só precisa
+registrá-lo (`AddTecVault`) quando usa `ClientSecretName`. O núcleo, o `TEC.Security.AspNetCore`
 e o `TEC.Security.Testing` não o usam.
 
 </details>

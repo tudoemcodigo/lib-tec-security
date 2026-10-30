@@ -65,19 +65,19 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
         options.ClientId = "servico-faturamento";
         options.ClientSecretName = "segredo-faturamento";   // lido do TEC.Vault (ISecretReader) a cada obtenção de token
     }));
-
-// Limitação atual: o AddOpenIdConnectClient registra o IAccessTokenProvider como cliente tipado do HttpClient e o container
-// não consegue resolvê-lo (falta OpenIdConnectClientOptions). Registre o provedor à mão, depois do AddTecSecurity:
-builder.Services.AddSingleton<IAccessTokenProvider>(sp => sp.GetRequiredService<OpenIdConnectAccessTokenProvider>());
 ```
 
-Funciona também em workers (não depende de `AddAspNetCore`). Registre o TEC.Vault (`AddTecVault(...)`) para o `ClientSecretName`.
-Sem `TokenEndpoint`, o endpoint é `{Authority}/protocol/openid-connect/token` (padrão do Keycloak); no Entra ID informe
+O `AddOpenIdConnectClient` registra o `OpenIdConnectAccessTokenProvider` e o `IAccessTokenProvider` como Singleton, com um
+`HttpClient` nomeado (`OpenIdConnect.M2M`) que não segue redirecionamentos nem guarda cookies. Funciona também em workers
+(não depende de `AddAspNetCore`). Registre o TEC.Vault (`AddTecVault(...)`) para o `ClientSecretName`. Sem
+`TokenEndpoint`, o endpoint é `{Authority}/protocol/openid-connect/token` (padrão do Keycloak); no Entra ID informe
 `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token` ([🪪 Provedor Entra ID](provedor-entra-id.md#chamar-outras-apis)).
 
-> [!WARNING]
-> Sem o registro explícito do `IAccessTokenProvider`, a resolução do `AddOpenIdConnectAccessToken` falha com
-> `Unable to resolve service for type 'OpenIdConnectClientOptions'`.
+> [!NOTE]
+> As opções do cliente são validadas na subida do host (`ValidateOnStart`): sem `ClientId`, sem endpoint, endpoint ou
+> `Authority` sem HTTPS (exceto loopback), sem segredo, `ClientSecretName` sem `ISecretReader` registrado, `Timeout` fora do
+> limite, `Resilience` inválida ou `AuthType = PrivateKeyJwt` impedem a aplicação de subir (`OptionsValidationException`).
+> Há um cliente por aplicação: chamar `AddOpenIdConnectClient` de novo lança `InvalidOperationException`.
 
 ### Client credentials num HttpClient
 
@@ -94,8 +94,9 @@ builder.Services.AddHttpClient<EstoqueClient>(c => c.BaseAddress = new Uri("http
   única obtenção (uma trava por conjunto de escopos).
 - A renovação começa `min(5 minutos, 1/4 da validade)` antes de expirar: tokens curtos (ex.: 5 minutos) também são reaproveitados.
 - Um header `Authorization` já presente na requisição é mantido (o handler não sobrescreve nem consulta o provedor).
-- Falha na obtenção chega como exceção do provedor (ver [Erros](#-erros)); o provedor OpenID Connect **não** mantém o token
-  vencido nem usa o token atual quando a renovação falha.
+- Falha na obtenção chega como `SecurityTokenAcquisitionException` (ver [Erros](#-erros)). O provedor OpenID Connect herda
+  `CachingAccessTokenProvider`: se a renovação falhar e o token atual ainda valer mais de 30 segundos, ele continua em uso
+  (log 3122); token vencido nunca é usado.
 
 ### Token direto, sem HttpClient
 
@@ -130,7 +131,7 @@ public sealed class KeycloakTokenProvider(IHttpClientFactory http, TimeProvider 
         var client = http.CreateClient("keycloak");
         // ... chama o endpoint de token do seu IdP e lê access_token/expires_in com teto de tamanho
         // Tokens curtos (ex.: 5 minutos, padrão do Keycloak) também são reaproveitados: renovação com 1/4 da validade restante
-        long expiresIn = 3600;   // expires_in da resposta
+        long expiresIn = 3600;   // expires_in lido da resposta: recuse valor inválido; sem ele, prefira uma validade curta
         return new AccessToken("<token>", time.GetUtcNow().AddSeconds(expiresIn));
     }
 }
@@ -156,17 +157,23 @@ em uso (log 3122): uma instabilidade passageira do IdP não derruba as chamadas.
 O `OpenIdConnectAccessTokenProvider` cria um `SecurityCircuitBreaker` (`Polly.Core`, nome `OpenIdConnect.M2M` nas métricas e
 logs) em volta do pedido ao endpoint de token, ligado por padrão (`OpenIdConnectClientOptions.Resilience`):
 
-- Com falhas demais na janela, o circuito abre: as chamadas seguintes lançam `SecurityCircuitOpenException` na hora, sem
-  chegar ao IdP, até o fim da pausa; depois uma chamada de teste (meia-abertura) fecha o circuito se funcionar.
+- Com falhas demais na janela, o circuito abre: as chamadas seguintes falham na hora, sem chegar ao IdP, até o fim da
+  pausa (`SecurityTokenAcquisitionException` com `SecurityCircuitOpenException` em `InnerException`); se o token atual
+  ainda valer mais de 30 segundos, ele continua em uso. Depois da pausa, uma chamada de teste (meia-abertura) fecha o
+  circuito se funcionar.
 - Cancelamento pedido pelo chamador não abre o circuito; na chamada de teste conta como falha. Tempo limite do pedido
-  (`Timeout`, 10 s) é falha do destino.
+  (`Timeout`, 10 s, do envio até a leitura completa do corpo) é falha do destino.
 - Não há retentativa no provedor OpenID Connect: uma falha é lançada uma vez; o que repete é a aplicação.
 
-```json
-{ "Resilience": { "Enabled": true, "FailureRatio": 0.5, "MinimumThroughput": 10, "SamplingDuration": "00:00:30", "BreakDuration": "00:00:30" } }
-```
+Essas opções não são lidas do `appsettings.json`: o `OpenIdConnectClientOptions` é configurado em código, dentro do
+`AddOpenIdConnectClient` (os valores abaixo são os padrões, exceto a pausa):
 
-(`OpenIdConnectClientOptions` é configurado em código: `options.Resilience.BreakDuration = TimeSpan.FromSeconds(60)`.)
+```csharp
+options.Resilience.FailureRatio = 0.5;
+options.Resilience.MinimumThroughput = 10;
+options.Resilience.SamplingDuration = TimeSpan.FromSeconds(30);
+options.Resilience.BreakDuration = TimeSpan.FromSeconds(60);
+```
 
 Num provedor de token próprio, passe um `SecurityCircuitBreaker` ao construtor de `CachingAccessTokenProvider`: aberto, a
 renovação falha na hora e a regra do token atual continua valendo, e a exceção chega como `SecurityTokenAcquisitionException`
@@ -196,8 +203,11 @@ public async Task<Result> SincronizarAsync(CancellationToken cancellationToken)
 ```
 
 Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de exceções converte qualquer `AppException` em
-`Result` (e o TEC.Cqrs.AspNetCore responde 502 padronizado). O provedor OpenID Connect lança `InvalidOperationException` e
-`SecurityCircuitOpenException` direto: capture-as se quiser o mesmo tratamento.
+`Result` (e o TEC.Cqrs.AspNetCore responde 502 padronizado). O provedor OpenID Connect também lança
+`SecurityTokenAcquisitionException` em toda falha de obtenção (segredo não encontrado no cofre, HTTP de erro ou 3xx, tempo
+limite, resposta grande demais ou inválida, circuito aberto); a causa original fica em `InnerException`. Opções inválidas não
+chegam até aqui: com `AddOpenIdConnectClient` elas impedem a subida (`OptionsValidationException`), e criando o provedor
+direto o construtor lança `InvalidOperationException` ou `NotSupportedException`.
 
 ---
 
@@ -207,13 +217,15 @@ Dentro de um handler do TEC.Cqrs nem o `try` é necessário: o comportamento de 
 
 | Opção | Padrão | Descrição |
 |---|---|---|
-| `Authority` | vazio | Base para inferir o endpoint de token (`{Authority}/protocol/openid-connect/token`) |
-| `TokenEndpoint` | `null` | Endpoint de token direto; informe `TokenEndpoint` ou `Authority` |
+| `Authority` | vazio | Base para inferir o endpoint de token (`{Authority}/protocol/openid-connect/token`); HTTPS, exceto loopback |
+| `TokenEndpoint` | `null` | Endpoint de token direto; informe `TokenEndpoint` ou `Authority`; HTTPS, exceto loopback |
 | `ClientId` | — (obrigatório) | Client id da aplicação |
-| `ClientSecretName` / `ClientSecret` | `null` | Segredo no TEC.Vault (preferido) ou direto; um dos dois é obrigatório |
-| `Timeout` | 10 s | Tempo limite do pedido ao endpoint de token |
+| `ClientSecretName` / `ClientSecret` | `null` | Segredo no TEC.Vault (preferido; exige `ISecretReader` registrado) ou direto; um dos dois é obrigatório |
+| `Timeout` | 10 s | Tempo limite do pedido ao endpoint de token, do envio até a leitura completa do corpo; maior que zero e até 5 minutos |
 | `Resilience` | ligado | `SecurityCircuitBreakerOptions` (abaixo) |
-| `AuthType`, `CertificateName` | `ClientSecret`, `null` | Sem efeito: `PrivateKeyJwt` não está implementado |
+| `AuthType`, `CertificateName` | `ClientSecret`, `null` | `PrivateKeyJwt` está reservado, mas não é implementado: impede a subida e, criando o provedor direto, o construtor lança `NotSupportedException`. `CertificateName` não é usado |
+
+Todas são conferidas na subida (`ValidateOnStart`) e de novo no construtor do `OpenIdConnectAccessTokenProvider`.
 
 **`SecurityCircuitBreakerOptions`** (`TEC.Security.Resilience`)
 
@@ -258,12 +270,12 @@ mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, 
 
 | Erro | Quando ocorre | O que fazer |
 |---|---|---|
-| `InvalidOperationException` (registro) | `AccessTokenHandlerOptions` sem escopo ou sem host válido | Informe `Scopes` e `AllowedHosts` |
-| `InvalidOperationException` (resolução) | `Unable to resolve service for type 'OpenIdConnectClientOptions'` ao resolver `IAccessTokenProvider` | Registre o `IAccessTokenProvider` à mão (acima) |
-| `InvalidOperationException` (primeira obtenção) | Sem `ClientId`; sem `TokenEndpoint` nem `Authority`; sem `ClientSecret`/`ClientSecretName`; `ISecretReader` não registrado; segredo não encontrado no cofre | Configure o cliente e o TEC.Vault |
-| `InvalidOperationException`: `Falha ao obter token M2M ... HTTP <status>: <corpo>` | O endpoint de token recusou o pedido, ou a resposta não trouxe `access_token` | Leia o código OAuth no corpo (ex.: `invalid_client`); não registre a mensagem em log aberto |
-| `SecurityCircuitOpenException` | Circuito aberto após falhas repetidas do endpoint de token | Aguarde a pausa; veja os logs 3123–3125 |
-| `HttpRequestException` + log 3121 | Destino fora de `AllowedHosts`, sem HTTPS, com usuário na URL ou em porta não autorizada | Inclua o host (e a porta, se não for a padrão); `AllowHttpForLoopback` só em desenvolvimento |
+| `InvalidOperationException` (registro) | `AccessTokenHandlerOptions` sem escopo ou sem host válido; `AddOpenIdConnectClient` chamado duas vezes | Informe `Scopes` e `AllowedHosts`; registre um único cliente |
+| `OptionsValidationException` (subida) | Sem `ClientId`; sem `TokenEndpoint` nem `Authority`; endpoint de token ou `Authority` sem HTTPS (exceto loopback); sem `ClientSecret` nem `ClientSecretName`; `ClientSecretName` sem `ISecretReader` registrado; `Timeout` menor ou igual a zero ou acima de 5 minutos; `Resilience` fora dos limites; `AuthType = PrivateKeyJwt` | Configure o cliente |
+| `InvalidOperationException` ou `NotSupportedException` (provedor criado direto) | `new OpenIdConnectAccessTokenProvider(...)` com as opções inválidas da linha acima, `ClientSecretName` sem `ISecretReader` (`InvalidOperationException`) ou `PrivateKeyJwt` (`NotSupportedException`) | Configure o cliente; use `ClientSecret` |
+| `SecurityTokenAcquisitionException` (causa em `InnerException`) | Segredo não encontrado no cofre; tempo limite (envio ou leitura do corpo); resposta 3xx ou de erro, com a mensagem `Falha ao obter token M2M do IdP. HTTP <status>.` (o corpo não é lido); corpo acima de 256 KB; JSON inválido ou sem `access_token`; `expires_in` inválido | Confira o cofre e o IdP; veja o log 3120 |
+| `SecurityTokenAcquisitionException` com `SecurityCircuitOpenException` em `InnerException` | Circuito aberto após falhas repetidas do endpoint de token | Aguarde a pausa; veja os logs 3123–3125 |
+| `HttpRequestException` + log 3121 | Destino fora de `AllowedHosts`, sem HTTPS, com usuário na URL ou em porta não autorizada. O `AddOpenIdConnectAccessToken` passa o logger ao handler; num `AccessTokenHandler` montado à mão sem logger, só a exceção aparece | Inclua o host (e a porta, se não for a padrão); `AllowHttpForLoopback` só em desenvolvimento |
 | `SecurityTokenAcquisitionException` + log 3120 | Provedor baseado em `CachingAccessTokenProvider` falhou e não há token ainda válido (mais de 30 s) | Veja o tipo no log; confira credencial e acesso ao cofre |
 | `InvalidOperationException`: `Mais de 1024 conjuntos de escopos distintos` | Escopos montados dinamicamente (`CachingAccessTokenProvider`) | Use conjuntos fixos |
 | `ObjectDisposedException` | `GetTokenAsync` depois do `Dispose` de um `CachingAccessTokenProvider` | Não use o provedor depois de descartado |
@@ -280,9 +292,21 @@ mascarado; `AccessTokenHandler(IAccessTokenProvider, AccessTokenHandlerOptions, 
 - Redirecionamentos: o `HttpClientHandler` remove o `Authorization` ao seguir um redirect, então o token não acompanha um
   302 para outro domínio.
 - Portas: `api.contoso.com` na lista libera só a 443; `api.contoso.com:8443` libera só a 8443.
-- A mensagem da exceção de falha do endpoint de token (provedor OpenID Connect) inclui o **corpo** da resposta do IdP: não a
-  registre nem a devolva ao cliente.
-- A resposta do endpoint de token do provedor OpenID Connect não tem teto de tamanho próprio além do tempo limite de 10 s.
+- A mensagem da exceção de falha do endpoint de token (provedor OpenID Connect) traz só o status HTTP; o corpo da resposta
+  de erro é descartado.
+- A resposta do endpoint de token tem teto de 256 KB (pelo `Content-Length` ou, sem ele, pela leitura limitada) e o
+  `Timeout` vale até a leitura completa do corpo, então um IdP lento no corpo também é cortado. Status fora de 2xx falha sem
+  o corpo ser lido.
+- O `expires_in` precisa ser um inteiro positivo (número ou texto numérico, como no endpoint v1 do Entra ID). Ausente, o
+  provedor assume 60 segundos, uma validade curta de propósito: o token é renovado logo, em vez de ficar em cache além da
+  validade real. Zero, negativo, decimal ou outro tipo recusam a resposta (falha fechada); acima de 24 horas, o cache
+  considera 24 horas.
+- O `HttpClient` do provedor é criado uma vez e guardado no Singleton, então a rotação periódica de handlers do
+  `IHttpClientFactory` não o alcança. Por isso o handler (`SocketsHttpHandler`) recicla as conexões a cada 2 minutos
+  (`PooledConnectionLifetime`) e uma troca de DNS do IdP é vista sem reiniciar.
+- Redirecionamentos do endpoint de token não são seguidos (`AllowAutoRedirect = false`, também sem cookies): o client secret
+  vai no corpo do POST, e um 307/308 o reenviaria a outro destino. Um 3xx é falha. Se passar um `HttpClient` próprio ao
+  construtor do `OpenIdConnectAccessTokenProvider`, desligue o redirecionamento no handler dele.
 - Mantenha o segredo no TEC.Vault; `ClientSecret` na configuração só como último recurso.
 
 ---
@@ -307,9 +331,10 @@ Sim, com `AllowHttpForLoopback = true` e `localhost` em `AllowedHosts`. Nunca ha
 <details>
 <summary>Como o destino vê a chamada?</summary>
 
-Como um token de aplicação do seu IdP. No TEC.Security do destino, o `Kind` é inferido pelo provedor OpenID Connect
-([🌐 Provedor OpenID Connect](provedor-openid-connect.md#mapeamento-de-claims)); confira o aviso sobre tokens de aplicação
-do Entra ID.
+Como um token de aplicação do seu IdP. No TEC.Security do destino, o `Kind` vem das regras do esquema
+([🌐 Provedor OpenID Connect](provedor-openid-connect.md#tipo-da-identidade-kind)): com o Entra ID, um token sem `scp` é
+`Application`; com outros IdPs, configure a regra que reconhece os tokens de aplicação (ex.: `client_id=*` para a conta de
+serviço do Keycloak), senão o token é recusado.
 
 </details>
 

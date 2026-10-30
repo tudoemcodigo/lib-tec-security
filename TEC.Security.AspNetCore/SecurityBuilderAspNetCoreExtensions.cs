@@ -31,7 +31,7 @@ public static class SecurityBuilderAspNetCoreExtensions
     /// </summary>
     /// <remarks>
     /// No pipeline: <c>app.UseAuthentication(); app.UseAuthorization();</c> (o <c>WebApplication</c> adiciona os dois
-    /// automaticamente quando os serviços estão registrados). Adicione os provedores em seguida (ex.: <c>AddEntraIdApi</c>).
+    /// automaticamente quando os serviços estão registrados). Adicione os provedores em seguida (ex.: <c>AddOpenIdConnectApi</c>).
     /// </remarks>
     /// <exception cref="InvalidOperationException">Chamado mais de uma vez ou opções inválidas.</exception>
     public static SecurityBuilder AddAspNetCore(this SecurityBuilder builder, Action<SecurityAspNetCoreOptions>? configure = null)
@@ -119,7 +119,7 @@ public static class SecurityBuilderAspNetCoreExtensions
 
     /// <summary>
     /// Registra um provedor de tokens bearer (JWT) com os padrões endurecidos de <see cref="JwtHardening"/>, a escolha do esquema
-    /// pelo token e a normalização da identidade. Uso pelos pacotes de provedor (ex.: <c>AddEntraIdApi</c>).
+    /// pelo token e a normalização da identidade. Uso pelos pacotes de provedor (ex.: <c>AddOpenIdConnectApi</c>).
     /// </summary>
     /// <exception cref="InvalidOperationException">Sem <see cref="AddAspNetCore"/> antes, ou esquema repetido.</exception>
     public static SecurityBuilder AddJwtBearerProvider(this SecurityBuilder builder, JwtProviderDefinition definition)

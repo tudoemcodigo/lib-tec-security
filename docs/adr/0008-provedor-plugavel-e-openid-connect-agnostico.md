@@ -24,6 +24,6 @@ Os sistemas do ecossistema TEC usam provedores diferentes (Keycloak, Auth0, Okta
 - O núcleo funciona em workers sem ASP.NET Core.
 
 ### Neutras / Negativas
-- Recursos específicos de um IdP não existem no provedor agnóstico: hoje o Entra ID não tem On-Behalf-Of, credenciais por certificado/identidade gerenciada, nem validação de `azp`/`idtyp`, e `OpenIdConnectM2MAuthType.PrivateKeyJwt` está declarado sem implementação ([provedor-entra-id.md](../provedor-entra-id.md#o-que-não-existe)).
-- O emissor aceito é único por esquema (igual à `Authority`); vários tenants com emissores diferentes exigem um esquema por emissor.
-- O tipo da identidade é inferido por heurística dos claims, o que classifica como `User` um token de aplicação do Entra ID que traga `roles`.
+- Recursos específicos de um IdP não existem no provedor agnóstico: hoje o Entra ID não tem On-Behalf-Of, credenciais por certificado/identidade gerenciada, nem validação de `azp`/`idtyp` para autorizar, e `OpenIdConnectM2MAuthType.PrivateKeyJwt` está reservado sem implementação (com ele, o `AddOpenIdConnectClient` impede a subida) ([provedor-entra-id.md](../provedor-entra-id.md#o-que-não-existe)).
+- O emissor aceito é a `Authority` ou, com `MultiTenant`, um item de `ValidIssuers`; os emissores extras usam o JWKS da `Authority`. IdPs com chaves distintas por emissor (um realm do Keycloak por tenant) exigem um esquema por emissor.
+- O tipo da identidade vem de regras por esquema e o token não reconhecido é recusado ([ADR 0009](0009-tipo-da-identidade-por-regras-com-recusa-do-token-nao-reconhecido.md)); cada IdP pode exigir uma regra própria (ex.: contas de serviço do Keycloak).

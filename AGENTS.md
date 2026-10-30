@@ -6,7 +6,7 @@ Este arquivo complementa as instruções herdadas de `AGENT_BASE.md`. O TEC.Secu
 
 - O escopo padrão é este repositório. Não altere outros repositórios `TEC.*`, não publique pacotes/tags/releases e não rode sincronizações que escrevam fora daqui sem pedido explícito.
 - Antes de editar, confira `git status` e `git diff`. Preserve alterações não commitadas; não use reset, checkout destrutivo ou limpeza para descartar trabalho existente.
-- Mudanças em APIs públicas (`ISecurityUser`, `ICurrentUser`, `ICurrentTenant`, `ISecurityContext`, `ITenantRegistry`, `IPermissionStore`, `IAccessTokenProvider`, `ISecurityUserFactory`), validação JWT endurecida, `[TecAuthorize]`, tenants, API keys, chamadas M2M ou alvos .NET exigem revisão de compatibilidade, documentação, changelog e consumidores.
+- Mudanças em APIs públicas (`ISecurityUser`, `ICurrentUser`, `ICurrentTenant`, `ISecurityContext`, `ITenantRegistry`, `IPermissionStore`, `IAccessTokenProvider`, `SecurityIdentityFactory`), validação JWT endurecida, `[TecAuthorize]`, tenants, API keys, chamadas M2M ou alvos .NET exigem revisão de compatibilidade, documentação, changelog e consumidores.
 - Testes devem atravessar contratos públicos e verificar resultados observáveis. Para mudanças de comportamento, cubra entradas inválidas, limites, falhas e concorrência quando aplicável.
 - Trate todo dado externo como não confiável. Não exponha segredos, PII ou conteúdo controlado pelo usuário em exceções, logs, URLs ou sumários.
 - Zero Trust: todo token validado por inteiro (algoritmos só RS*/PS*/ES*, emissor exato, audiência, tolerância 30s), claims `tec_*` do provedor descartados, tenant vem só do cadastro, respostas não revelam motivo da recusa, nenhum token/segredo/dado pessoal em log/trace/métrica.
@@ -16,19 +16,20 @@ Este arquivo complementa as instruções herdadas de `AGENT_BASE.md`. O TEC.Secu
 
 ## Mapa da implementação
 
-- `TEC.Security/`: biblioteca multi-target (`net8.0` e `net10.0`), núcleo sem ASP.NET Core.
-  - `Abstractions/`: `ISecurityUser`, `ICurrentUser`, `ICurrentTenant`, `ISecurityContext`, `ITenantRegistry`, `IPermissionStore`, `IAccessTokenProvider`, `ICachingAccessTokenProvider`, `SecurityErrors`, `TecClaimTypes`, `TecPrincipalKinds`.
-  - `Authorization/`: `[TecAuthorize]`, `RequireTecAuthorization`, `FallbackPolicy` fechada, `IPermissionChecker`.
-  - `Identity/`: `SecurityIdentityFactory` (descarta `tec_*`, tenant do cadastro, papéis → permissões), `ExternalIdentity`.
-  - `ApiKeys/`: `ApiKeyGenerator`, hash SHA-256, limite de tentativas, rotação.
-  - `Workers/`: `ISecurityContext.CreateSystemPrincipalAsync`, `RunAs`.
-  - `Telemetry/`: `ActivitySource` e `Meter` `TEC.Security` da BCL; assinados pelo TEC.Observability via prefixo `TEC.*`.
-- `TEC.Security.AspNetCore/`: escolha do provedor por requisição, JWT endurecido, `[TecAuthorize]`, policies fechadas, 401/403 padronizados (`ApiResponse` do TEC.Core), API key, login web, base para provedores.
+- `TEC.Security/`: biblioteca `net10.0`, núcleo sem ASP.NET Core.
+  - `Abstractions/`: `ISecurityUser`, `ISecurityContext`, `ITenantRegistry` (e `ICurrentTenant`), `IPermissionStore`, `IAccessTokenProvider`. `ICurrentUser` vem do TEC.Core.
+  - `Claims/`: `SecurityIdentityFactory` (descarta `tec_*`, tenant do cadastro, papéis → permissões), `ExternalIdentity`, `SecurityUser`, `TecClaimTypes` e `NormalizedIdentity` (tipo interno que prova a normalização; o login web do `TEC.Security.AspNetCore` o reconstrói do cookie via `InternalsVisibleTo`: mantenha `RestoreTrusted` estável).
+  - `Common/`: `SecurityErrors`, `SecurityRules`. `Configuration/`: `SecurityOptions` e as opções de tenants, permissões e API keys.
+  - `ApiKeys/`: `ApiKeyGenerator` e `ApiKeyValidator` (hash SHA-256, tempo constante, validade obrigatória). O componente não limita tentativas.
+  - `Context/`: `ISecurityContext` (`CreateSystemPrincipalAsync`, `RunAs`) e `CurrentSecurityUser`.
+  - `Tenants/`, `Permissions/`, `Tokens/` (`AccessTokenHandler`, `CachingAccessTokenProvider`), `Resilience/` (circuit breaker), `DependencyInjection/`.
+  - `Diagnostics/`: `ActivitySource` e `Meter` `TEC.Security` da BCL; assinados pelo TEC.Observability via prefixo `TEC.*`.
+- `TEC.Security.AspNetCore/`: escolha do provedor por requisição, JWT endurecido, `[TecAuthorize]` (`TecPrincipalKinds`, `RequireTecAuthorization`), policies fechadas, 401/403 padronizados (`ApiResponse` do TEC.Core), API key, login web, base para provedores.
 - `TEC.Security.OpenIdConnect/`: OpenID Connect agnóstico (Keycloak, Auth0, Okta, Entra ID, Google, Cognito), M2M Client Credentials, login web com PKCE. Depende de `TEC.Vault` para segredo do cliente.
 - `TEC.Security.Testing/`: emissor de tokens para testar a sua API, bloqueado fora de Development, Testing e Test.
-- `TEC.Security.Tests/`: 190 testes unitários por TFM (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo constante).
+- `TEC.Security.Tests/`: 309 testes unitários (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo constante).
 - `TEC.Security.LoadTests/`: 8 de carga rápida (`Carga-CI`), 3 `Seguranca-Pesada`, 6 `Carga-Pesada` sob demanda.
-- `samples/`: exemplos de uso.
+- `TEC.Security.Benchmarks/`: BenchmarkDotNet do caminho quente (sob demanda).
 - `build/`: props/targets compartilhados.
 - `docs/adr/`: decisões arquiteturais (identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers, provedores).
 - `docs/`: guias por configuração, autorização, identidade/permissões, tenants, provedor OIDC, Entra ID, chamadas entre serviços, API keys, workers, novo provedor, integrações TEC, observabilidade, erros, segurança, testes, desenvolvimento.
@@ -36,7 +37,7 @@ Este arquivo complementa as instruções herdadas de `AGENT_BASE.md`. O TEC.Secu
 ## Contratos relevantes
 
 - `Directory.Build.props` é a fonte única de versão do pacote (uma versão para os quatro pacotes). A versão inicial é `0.0.1`; não introduza versões nos `.csproj`.
-- `Directory.Packages.props` pode declarar versões distintas por TFM; condições por TFM são intencionais.
+- Alvo único `net10.0` (vem do `build/Tec.Build.props` canônico). O `Directory.Packages.props` declara uma versão por pacote; os pacotes do ASP.NET Core acompanham o framework do alvo (10.0.x).
 - Dependências TEC.* são declaradas com `<TecReference Include="..." />`, não com `PackageReference` direto.
 - `ISecurityUser` implementa `ICurrentUser` do TEC.Core; a identidade normalizada chega aos outros componentes sem que eles dependam do TEC.Security.
 - `TEC.Security.OpenIdConnect` depende de `TEC.Vault` para ler segredo do cliente (`ISecretReader`) do login web e chamadas entre serviços.

@@ -29,8 +29,7 @@ Os componentes TEC.* são declarados nos csproj por `<TecReference>` (nunca `Pac
 | Projeto | `TecReference` |
 |---|---|
 | `TEC.Security` | `TEC.Core` |
-| `TEC.Security.EntraId` | `TEC.Vault` |
-| `TEC.Security.Tests` | `TEC.Vault.AzureKeyVault`, `TEC.Vault.InMemory` |
+| `TEC.Security.OpenIdConnect` | `TEC.Core`, `TEC.Vault` |
 
 O `build/Tec.Build.targets` decide como resolver cada uma:
 
@@ -55,8 +54,8 @@ flowchart LR
 
 > [!TIP]
 > **Versão dos TEC.* consumidos:** fica no `Directory.Packages.props` deste repositório, uma por pacote
-> (`<PackageVersion Include="TEC.Core" Version="0.0.1" />`, idem para `TEC.Vault`, `TEC.Vault.AzureKeyVault` e
-> `TEC.Vault.InMemory`); os csproj mantêm só `<TecReference Include="..." />`, sem versão. Para usar outra versão
+> (`<PackageVersion Include="TEC.Core" Version="0.0.1" />`, idem para `TEC.Vault`); os csproj mantêm só
+> `<TecReference Include="..." />`, sem versão. Para usar outra versão
 > publicada, altere o `PackageVersion` (o Dependabot abre o PR) e regenere os `packages.lock.json`
 > ([Lock files](#lock-files)). Os componentes evoluem de forma independente: o TEC.Core pode ficar em `0.0.1` enquanto
 > o TEC.Vault ou o TEC.Security sobem a própria `<Version>`.
@@ -69,8 +68,7 @@ flowchart LR
 
 | Item | Detalhe |
 |---|---|
-| SDK | .NET 10 (`global.json`: `10.0.100`, `rollForward: latestFeature`) e os runtimes .NET 8 e ASP.NET Core 8 para os testes em `net8.0` |
-| Azure CLI | Só para a integração com Entra ID e Key Vault (`az login`) |
+| SDK | .NET 10 (`global.json`: `10.0.402`, `rollForward: latestPatch`); o único alvo é `net10.0` |
 | Feed `tec-interno` | Leitura obrigatória no modo pacote, o padrão (PAT classic com `read:packages`; o GitHub Packages exige token mesmo para pacote público) |
 
 ```bash
@@ -86,7 +84,7 @@ dotnet nuget add source https://nuget.pkg.github.com/tudoemcodigo/index.json -n 
 D:\Projetos\Componentes\
 ├── tec-workflows\   CI/CD e arquivos canônicos
 ├── TEC.Core\        ⟵ dependência do TEC.Security
-├── TEC.Vault\       ⟵ dependência do TEC.Security.EntraId e dos testes
+├── TEC.Vault\       ⟵ dependência do TEC.Security.OpenIdConnect
 ├── TEC.Security\    este repositório
 └── ...              TEC.Cqrs, TEC.Observability, TEC.ORM
 ```
@@ -124,8 +122,7 @@ dotnet restore TEC.Security.slnx --force-evaluate
 
 > [!WARNING]
 > Regenerar o lock versionado (e compilar no modo padrão) exige que as versões TEC.* referenciadas **já estejam publicadas** no feed (ordem: Core →
-> Vault → Cqrs → Security → Observability → ORM). Enquanto `TEC.Core` e `TEC.Vault` 0.0.1 não estiverem no feed, esse
-> restore falha.
+> Vault → Cqrs → Security → Observability → ORM). Se uma versão referenciada ainda não estiver no feed, o restore falha.
 
 ### Arquivos canônicos
 
@@ -153,7 +150,7 @@ repositório: `Directory.Build.props` (`TecComponent` e `Version`), `Directory.P
 | `TecUseLocalProjects` | `false` (sempre `false` com `CI=true`) | `true` liga a troca de `TecReference` por `ProjectReference` quando o repositório vizinho existe |
 | `TecComponentsRoot` | Pasta acima do repositório | Onde procurar os repositórios vizinhos |
 | `PackageVersion` dos TEC.* (`Directory.Packages.props`) | `0.0.1` | Versão publicada de cada TEC.* consumido no modo pacote (o Dependabot atualiza) |
-| `Version` (`Directory.Build.props`) | `0.2.0` | Versão única dos 4 pacotes deste repositório; base das prévias do CI (`<Version>-preview.N` a cada push na `main`). Suba depois de publicar `X.Y.Z` |
+| `Version` (`Directory.Build.props`) | `0.0.1` | Versão única dos 4 pacotes deste repositório; base das prévias do CI (`<Version>-preview.N` a cada push na `main`). Suba depois de publicar `X.Y.Z` |
 
 ---
 
@@ -164,6 +161,7 @@ repositório: `Directory.Build.props` (`TecComponent` e `Version`), `Directory.P
 | `NU1100 Unable to resolve 'TEC.Core'` (ou `TEC.Vault`) | Modo pacote sem a origem `tec-interno` (ou com outro nome) | Adicione a origem com o nome exato `tec-interno` (ou use o modo local com o vizinho clonado ao lado) |
 | `401`/`403` no restore | PAT sem `read:packages` ou expirado | Gere outro PAT classic e refaça o `dotnet nuget update source tec-interno` |
 | `NU1004` no restore | Lock file desatualizado | Regenere com `dotnet restore TEC.Security.slnx --force-evaluate` |
+| `NU1101 ... Não existe nenhum pacote com esta ID nas origens: tec-interno` | A credencial do feed não enxerga os pacotes da organização (ou a versão não foi publicada) | Corrija o acesso ao feed. O restore que falha reescreve os `packages.lock.json` **sem** as entradas TEC.*: não commite essa alteração; repita o restore com acesso |
 | `NU1901`–`NU1904` | Vulnerabilidade conhecida em dependência (inclusive transitiva) | Atualize o pacote no `Directory.Packages.props` e regenere os locks |
 | `Use <TecReference ...> em vez de PackageReference` | `PackageReference` para um TEC.* | Troque por `<TecReference Include="TEC.X" />` |
 | `dotnet test` roda 0 testes (código 5) | `-nologo` no Microsoft.Testing.Platform | Remova `-nologo` |

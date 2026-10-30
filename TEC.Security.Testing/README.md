@@ -28,7 +28,7 @@ tenants, papéis e escopos, e casos de erro (token expirado, de outra audiência
 
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/tudoemcodigo/index.json -n tec-interno -u <usuario> -p <PAT>
-dotnet add package TEC.Security.Testing --version 0.2.0
+dotnet add package TEC.Security.Testing --version 0.0.1
 ```
 
 Instale só no projeto de testes. O feed do GitHub Packages exige um PAT *classic* com `read:packages`.
@@ -64,4 +64,4 @@ client.DefaultRequestHeaders.Authorization = new("Bearer", token);
 [Autorização](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/autorizacao.md) ·
 [Tenants](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/tenants.md)
 
-`net8.0` e `net10.0` · Native AOT · [MIT](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código
+`net10.0` · Native AOT · [Apache 2.0](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código

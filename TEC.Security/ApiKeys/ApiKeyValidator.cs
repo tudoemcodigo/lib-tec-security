@@ -227,30 +227,43 @@ public sealed class ApiKeyValidator
 
 /// <summary>
 /// Limita os logs de recusa repetidos (mesmo id e motivo) a um por intervalo, contando os omitidos. Memória limitada: com
-/// muitos ids distintos (ids inventados por um atacante), os novos dividem uma única entrada.
+/// muitos ids distintos (ids inventados por um atacante), os novos dividem uma única entrada por motivo.
 /// </summary>
+/// <remarks>
+/// Custo constante por recusa: a quantidade de entradas é contada à parte (o <c>Count</c> do <c>ConcurrentDictionary</c> trava
+/// todas as partições) e as janelas vencidas são removidas no máximo uma vez por intervalo, por uma única thread. Antes, com o
+/// dicionário cheio, cada id inventado varria todas as entradas.
+/// </remarks>
 internal sealed class RejectionLogLimiter(TimeProvider time, TimeSpan interval, int maxEntries = 1024)
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<(string KeyId, string Reason), Window> _windows = new();
+    private int _count;
+    private int _sweeps;
+    private long _nextSweepTicks;
+
+    /// <summary>Entradas guardadas (no máximo <c>maxEntries</c> mais uma compartilhada por motivo).</summary>
+    internal int Count => Volatile.Read(ref _count);
+
+    /// <summary>Varreduras de janelas vencidas feitas até agora (no máximo uma por intervalo).</summary>
+    internal int Sweeps => Volatile.Read(ref _sweeps);
 
     /// <summary><c>true</c> se o log deve ser feito agora; <paramref name="suppressed"/> = recusas iguais omitidas antes dele.</summary>
     public bool TryEnter(string keyId, string reason, out int suppressed)
     {
         var now = time.GetUtcNow();
         var key = (keyId, reason);
-        if (!_windows.ContainsKey(key) && _windows.Count >= maxEntries)
+        if (!_windows.TryGetValue(key, out var current))
         {
-            foreach (var (existing, window) in _windows)
+            if (Volatile.Read(ref _count) >= maxEntries)
             {
-                if (now - window.Start >= interval)
-                    _windows.TryRemove(existing, out _);
+                SweepIfDue(now);
+                if (Volatile.Read(ref _count) >= maxEntries)
+                    key = ("*", reason);
             }
 
-            if (_windows.Count >= maxEntries)
-                key = ("*", reason);
+            current = GetOrAdd(key, now);
         }
 
-        var current = _windows.GetOrAdd(key, static (_, start) => new Window(start), now - interval);
         lock (current)
         {
             if (now - current.Start >= interval)
@@ -264,6 +277,42 @@ internal sealed class RejectionLogLimiter(TimeProvider time, TimeSpan interval, 
             current.Suppressed++;
             suppressed = 0;
             return false;
+        }
+    }
+
+    private Window GetOrAdd((string KeyId, string Reason) key, DateTimeOffset now)
+    {
+        while (true)
+        {
+            if (_windows.TryGetValue(key, out var existing))
+                return existing;
+
+            // Janela já vencida na criação: a primeira recusa de uma entrada nova é registrada
+            var created = new Window(now - interval);
+            if (_windows.TryAdd(key, created))
+            {
+                Interlocked.Increment(ref _count);
+                return created;
+            }
+        }
+    }
+
+    /// <summary>Remove as janelas vencidas, no máximo uma vez por intervalo (as demais threads seguem sem esperar).</summary>
+    private void SweepIfDue(DateTimeOffset now)
+    {
+        long due = Interlocked.Read(ref _nextSweepTicks);
+        if (now.UtcTicks < due || Interlocked.CompareExchange(ref _nextSweepTicks, now.UtcTicks + interval.Ticks, due) != due)
+            return;
+
+        Interlocked.Increment(ref _sweeps);
+        foreach (var (existing, window) in _windows)
+        {
+            bool expired;
+            lock (window)
+                expired = now - window.Start >= interval;
+
+            if (expired && _windows.TryRemove(existing, out _))
+                Interlocked.Decrement(ref _count);
         }
     }
 

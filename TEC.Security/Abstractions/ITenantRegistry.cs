@@ -12,8 +12,11 @@ public sealed record TenantInfo(string Id, string? Name, bool Enabled);
 /// </summary>
 /// <remarks>
 /// <para>Padrão: lido de <c>Security:Tenants</c> com recarga (<c>reloadOnChange</c>): incluir, desativar ou remover um tenant
-/// no appsettings vale na próxima requisição, sem reiniciar. Uma recarga inválida (ex.: o mesmo tenant do provedor em dois
-/// tenants) é <b>recusada</b> com log de erro e o cadastro anterior continua valendo; na inicialização, a aplicação não sobe.</para>
+/// no appsettings vale na próxima requisição, sem reiniciar. Na inicialização, um cadastro inválido impede a aplicação de subir.
+/// Numa recarga com erro (ex.: o mesmo id externo em dois tenants), a versão nova vale <b>por entrada</b>, com log de erro
+/// (evento 3101): as entradas válidas entram em uso, inclusive desativações e remoções, e as com erro falham fechadas (o id
+/// externo repetido deixa de ser resolvido; tenant com id externo fora do formato fica inativo). O cadastro anterior não é
+/// mantido, para que um erro em uma entrada não preserve um tenant que a mesma edição desativou.</para>
 /// <para>Para guardar o cadastro no banco, implemente esta interface e registre com <c>security.UseTenantRegistry&lt;T&gt;()</c>.
 /// As consultas são síncronas e chamadas a cada autenticação: mantenha o cadastro em memória.</para>
 /// </remarks>

@@ -351,6 +351,28 @@ public class TechnicalReviewRegressionTests
         await Assert.That(logged).IsEqualTo(11);
     }
 
+    [Test]
+    public async Task Rejection_log_limiter_sweeps_expired_windows_at_most_once_per_interval()
+    {
+        var clock = new ManualTimeProvider(Now);
+        var limiter = new RejectionLogLimiter(clock, TimeSpan.FromMinutes(1), maxEntries: 10);
+
+        // Dicionário cheio e ids inventados em rajada: antes, cada id novo varria todas as entradas (O(n) por requisição)
+        for (int i = 0; i < 10_000; i++)
+            _ = limiter.TryEnter($"id-{i}", "id desconhecido", out _);
+        int sweepsDuringBurst = limiter.Sweeps;
+        int entriesDuringBurst = limiter.Count;
+
+        clock.Now = Now + TimeSpan.FromMinutes(1);
+        bool loggedAfterInterval = limiter.TryEnter("id-novo", "id desconhecido", out _);
+
+        await Assert.That(sweepsDuringBurst).IsEqualTo(1);
+        await Assert.That(entriesDuringBurst).IsEqualTo(11);   // 10 próprias + 1 compartilhada
+        await Assert.That(limiter.Sweeps).IsEqualTo(2);       // nova varredura só depois do intervalo
+        await Assert.That(loggedAfterInterval).IsTrue();      // janelas vencidas removidas: o id novo tem entrada própria
+        await Assert.That(limiter.Count).IsEqualTo(1);
+    }
+
     // ================================================================ apoio
 
     /// <summary>

@@ -37,8 +37,8 @@
 | 14 | [🛡️ Segurança](seguranca.md) | Modelo de ameaças com o teste de cada controle, controles obrigatórios, limites, riscos residuais e checklist |
 | 15 | [🧪 Testes](testes.md) | `TEC.Security.Testing` para a sua API; categorias, segurança, carga, benchmarks e variáveis `TEC_CARGA_*` |
 | 16 | [💻 Desenvolvimento local](desenvolvimento.md) | Como compilar (feed `tec-interno` por padrão, repositórios vizinhos sob demanda) e regenerar lock files |
-| 17 | [🔍 Revisão técnica](revisao-tecnica.md) | Revisão de segurança, código, organização e docs (2026-10-19): achados por severidade com `arquivo:linha`, correções e melhorias sugeridas |
-| 18 | [🏛️ Decisões de arquitetura (ADRs)](adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers e provedores |
+| 17 | [🔍 Revisão técnica](revisao-tecnica.md) | Revisão histórica de segurança, código, organização e docs (2026-10-19, versão 0.1.0, quando ainda existia o pacote `TEC.Security.EntraId`): achados com `arquivo:linha`, correções e melhorias sugeridas |
+| 18 | [🏛️ Decisões de arquitetura (ADRs)](adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers, provedores e tipo da identidade (`Kind`) |
 
 Fora de `docs/`: [⚙️ CI/CD](../.github/workflows/README.md) · [📝 Changelog](../CHANGELOG.md) · READMEs dos pacotes
 ([TEC.Security](../TEC.Security/README.md), [AspNetCore](../TEC.Security.AspNetCore/README.md),
@@ -77,7 +77,7 @@ flowchart TD
 | Fonte da verdade | O código atual: nomes, assinaturas, padrões, códigos de erro, eventos de log e métricas foram conferidos nele |
 | Estrutura | Cada tema tem breadcrumb, 📑 Sumário, 🎯 Visão geral, 🚀 Uso, ⚙️ Opções, ❌ Erros, 🛡️ Segurança, ❓ Perguntas frequentes e rodapé de navegação |
 | Decisões | Os [ADRs](adr/README.md) seguem o modelo Status, Data, Contexto, Decisão e Consequências, com links relativos para o código |
-| Termos | *Identidade normalizada*: principal criado pelo `SecurityIdentityFactory` (claims `tec_*` com a marca `tec_normalized`). *Provedor*: tipo de IdP (`OpenIdConnect`, `ApiKey`, `Test`, `System`). *Esquema*: nome de registro no ASP.NET Core (ex.: `Funcionarios`) |
+| Termos | *Identidade normalizada*: principal criado pelo `SecurityIdentityFactory` (claims `tec_*`; a prova é o tipo interno da identidade, não a marca `tec_normalized`). *Provedor*: tipo de IdP (`OpenIdConnect`, `ApiKey`, `Test`, `System`). *Esquema*: nome de registro no ASP.NET Core (ex.: `Funcionarios`) |
 | `Result` | Métodos que retornam `Result`/`Result<T>` do [TEC.Core](https://github.com/tudoemcodigo/lib-tec-core) usam os códigos de [`SecurityErrors`](erros.md); recusas de credencial nunca lançam: viram 401/403 |
 | Configuração inválida | Falha na **subida** (`InvalidOperationException` ou `OptionsValidationException`), citando o esquema e a regra |
 | Placeholders | Valores entre `< >` (`<tenant-id>`, `<client-id-da-api>`, `<nome-do-cofre>`) são do seu ambiente; `contoso`, `Funcionarios` e `pedidos:ler` são exemplos |

@@ -78,6 +78,15 @@ public static class KeycloakExtensions
                     return null;
                 }
 
+                // Tipo por sinal emitido pelo IdP (nunca por claim editável como preferred_username); sem sinal, recuse
+                bool application = token.TryGetPayloadValue<string>("client_id", out _);   // no Keycloak, só a conta de serviço
+                bool user = token.TryGetPayloadValue<string>("sid", out _);                // sessão de um usuário
+                if (application == user)
+                {
+                    reason = "tipo da identidade indeterminado";
+                    return null;
+                }
+
                 token.TryGetPayloadValue("scope", out string? scope);
                 reason = string.Empty;
                 return new ExternalIdentity
@@ -85,7 +94,7 @@ public static class KeycloakExtensions
                     Scheme = scheme,
                     Provider = ProviderName,
                     UserId = subject,
-                    Kind = string.IsNullOrEmpty(scope) ? PrincipalKind.Application : PrincipalKind.User,
+                    Kind = application ? PrincipalKind.Application : PrincipalKind.User,
                     ExternalTenantId = "contoso",   // ex.: o realm, vinculado em Security:Tenants:*:IdentityProviders:Keycloak
                     Roles = [.. token.Claims.Where(c => c.Type == "roles").Select(c => c.Value)],
                     Scopes = scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [],
@@ -159,9 +168,11 @@ sessão e 401 para chamadas de API ([🌐 Provedor OpenID Connect](provedor-open
 ### Checklist do provedor
 
 - [ ] `CanHandle` reconhece pelo **emissor exato** (e audiência, se houver vários esquemas do mesmo emissor).
-- [ ] `Configure` define `Authority` (ou `Configuration`), `ValidIssuer`/`ValidIssuers`/`IssuerValidator`,
+- [ ] `Configure` define `Authority` (ou `Configuration`), `ValidIssuer` ou `ValidIssuers` (`IssuerValidator` é recusado),
       `ValidAudience(s)` e `ValidAlgorithms` só com RS\*, PS\* ou ES\*.
 - [ ] `UserId` é estável e não reutilizável (`sub`/`oid`), nunca e-mail ou login.
+- [ ] `Kind` decidido por um sinal que o IdP emite (nunca por claim editável, como `preferred_username`); token sem sinal,
+      ou com sinais dos dois tipos, é recusado ([ADR 0009](adr/0009-tipo-da-identidade-por-regras-com-recusa-do-token-nao-reconhecido.md)).
 - [ ] Tokens de ID não são aceitos como access token (exija claims que só o access token tem).
 - [ ] Multi-tenant: o emissor/tenant aceito vem do cadastro (`ITenantRegistry.GetEnabledExternalIds(Provider)`).
 - [ ] O motivo da recusa (`reason`) não contém dados do token.
@@ -234,7 +245,7 @@ recarga do JWKS no máximo a cada 5 min (`RefreshInterval`) e automática a cada
 |---|---|---|
 | `InvalidOperationException` no registro | Sem `AddAspNetCore` antes; esquema repetido ou reservado (`TEC`, `TEC.None`); segundo login web; intervalos do login web fora da faixa | Corrija o registro |
 | `ArgumentException` | Nome de esquema fora do formato | Letras, dígitos e `_ . : / -` |
-| `OptionsValidationException` na subida (`Esquema '<nome>': ...`) | Validação de emissor/audiência/validade/assinatura desligada; `exp`/assinatura/audiência não exigidos; `SignatureValidator`/`LifetimeValidator`/`AlgorithmValidator` personalizados; `ClockSkew` fora de 0–2 min; `MapInboundClaims`/`SaveToken` ligados; `RequireHttpsMetadata` desligado; sem audiência ou emissor; algoritmo fora da lista de permissão; `Events`/`EventsType` substituídos | Remova o ajuste |
+| `OptionsValidationException` na subida (`Esquema '<nome>': ...`) | Validação de emissor/audiência/validade/assinatura desligada; `exp`/assinatura/audiência não exigidos; `SignatureValidator`/`LifetimeValidator`/`AlgorithmValidator`/`IssuerValidator`/`AudienceValidator` personalizados; `IssuerSigningKeyResolver`, `IssuerSigningKeyValidator` (exceto o `SigningKeyValidator` do provedor), `TokenReader`, `TransformBeforeSignatureValidation` ou `CryptoProviderFactory` definidos; chaves de decifração (JWE); `TokenHandlers` ou `UseSecurityTokenValidators` alterados; `ClockSkew` fora de 0–2 min; `MapInboundClaims`/`SaveToken` ligados; `RequireHttpsMetadata` desligado; sem audiência ou emissor; algoritmo fora da lista de permissão; `Events`/`EventsType` substituídos | Remova o ajuste |
 | `OptionsValidationException` (login web) | Fluxo diferente de `code`; PKCE, nonce ou state desligados; `SaveTokens` ou `MapInboundClaims` ligados; `GetClaimsFromUserInfoEndpoint`; algoritmo fora da lista (HMAC nunca); sem `ClientId` ou `Authority`; cookie sem HttpOnly/Secure/SameSite, acima de 12 h ou `__Host-` com `Domain`/`Path` | Remova o ajuste |
 | 401 + log 3201 | `CreateIdentity` recusou (motivo) ou a validação falhou (tipo da exceção) | Veja o motivo no log |
 
@@ -245,7 +256,10 @@ recarga do JWKS no máximo a cada 5 min (`RefreshInterval`) e automática a cada
 > [!WARNING]
 > Não substitua `Events` nem `EventsType`: a normalização mora nos métodos sobrescritos dos eventos do TEC.Security, e a
 > troca é recusada na subida. Para lógica extra, atribua os delegates (`o.Events.OnMessageReceived = ...`): eles rodam
-> **antes** e não conseguem pular a normalização (um `OnTokenValidated` que aprove sozinho vira recusa).
+> **antes** e não aprovam sozinhos. Viram recusa: `Success()` ou principal definido em `OnMessageReceived` e
+> `OnAuthenticationFailed` (e, no login web, em `OnAuthorizationCodeReceived` e `OnTokenResponseReceived`), um
+> `OnTokenValidated` que aprove ou troque o token ou o principal validado, e um `OnTicketReceived` que troque a identidade
+> normalizada. O cookie de sessão só aceita gravar a identidade criada pelo `SecurityIdentityFactory`.
 
 - O token é lido sem validação **só** para escolher o esquema; um valor adulterado leva no máximo a uma recusa.
 - Chaves vêm só do JWKS do emissor configurado (`jku`, `x5u` e `jwk` do cabeçalho são ignorados).

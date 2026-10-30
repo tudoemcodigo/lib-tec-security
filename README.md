@@ -6,10 +6,10 @@
 
 **Autenticação e autorização com uma única API para qualquer provedor de login: fechado por padrão, multi-tenant e sem segredos na aplicação.**
 
-OpenID Connect agnóstico (Keycloak, Auth0, Okta, Microsoft Entra ID, Google, Cognito) · `[TecAuthorize]` por permissão · Tenants por configuração · API keys · Login web (OIDC + PKCE) · Chamadas entre serviços M2M (Client Credentials) · Workers · .NET 8 e 10 · Native AOT
+OpenID Connect agnóstico (Keycloak, Auth0, Okta, Microsoft Entra ID, Google, Cognito) · `[TecAuthorize]` por permissão · Tenants por configuração · API keys · Login web (OIDC + PKCE) · Chamadas entre serviços M2M (Client Credentials) · Workers · .NET 10 · Native AOT
 
 [![CI](https://github.com/tudoemcodigo/lib-tec-security/actions/workflows/ci.yml/badge.svg)](https://github.com/tudoemcodigo/lib-tec-security/actions/workflows/ci.yml)
-[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](#-compatibilidade)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](#-compatibilidade)
 [![Native AOT](https://img.shields.io/badge/Native%20AOT-compat%C3%ADvel-512BD4)](#-compatibilidade)
 [![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)](CHANGELOG.md)
 [![Licença: Apache 2.0](https://img.shields.io/badge/licen%C3%A7a-Apache%202.0-blue)](LICENSE)
@@ -66,8 +66,8 @@ OpenID Connect agnóstico (Keycloak, Auth0, Okta, Microsoft Entra ID, Google, Co
 | [`TEC.Security.OpenIdConnect`](TEC.Security.OpenIdConnect/README.md) | OpenID Connect agnóstico: Keycloak, Auth0, Okta, Entra ID, Google, Cognito, M2M Client Credentials, login web com PKCE | Aplicações que usam qualquer IdP OIDC | `TEC.Security.AspNetCore`, `TEC.Vault`, `Polly.Core` |
 | [`TEC.Security.Testing`](TEC.Security.Testing/README.md) | Emissor de tokens para testar **a sua** API, bloqueado fora de Development, Testing e Test | Projetos de teste | `TEC.Security.AspNetCore` |
 
-Os quatro pacotes saem sempre com a mesma versão e trazem `lib/net8.0` e `lib/net10.0`, a documentação XML em português e
-um README próprio.
+Os quatro pacotes saem sempre com a mesma versão e trazem `lib/net10.0`, a documentação XML em português e um README
+próprio.
 
 ## 🧬 Ecossistema TEC
 
@@ -229,15 +229,15 @@ flowchart LR
 | [🛡️ Segurança](docs/seguranca.md) | Modelo de ameaças, controles com os testes, limites, riscos residuais e checklist |
 | [🧪 Testes](docs/testes.md) | Testar a sua API; categorias, carga, benchmarks, variáveis `TEC_CARGA_*` |
 | [💻 Desenvolvimento local](docs/desenvolvimento.md) | Como compilar (feed `tec-interno` por padrão, repositórios vizinhos sob demanda) e regenerar lock files |
-| [🔍 Revisão técnica](docs/revisao-tecnica.md) | Revisão de segurança, código, organização e docs (2026-10-19): achados por severidade com `arquivo:linha`, correções e melhorias sugeridas |
-| [🏛️ Decisões de arquitetura (ADRs)](docs/adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers e provedores |
+| [🔍 Revisão técnica](docs/revisao-tecnica.md) | Revisão histórica de segurança, código, organização e docs (2026-10-19, versão 0.1.0, quando ainda existia o pacote `TEC.Security.EntraId`): achados com `arquivo:linha`, correções e melhorias sugeridas |
+| [🏛️ Decisões de arquitetura (ADRs)](docs/adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers, provedores e tipo da identidade (`Kind`) |
 | [⚙️ CI/CD](.github/workflows/README.md) | Workflows, gatilhos, Variables e como publicar |
 
 ## ⚡ Compatibilidade
 
 | Item | Suporte |
 |---|---|
-| .NET | `net8.0` e `net10.0` (LTS), mesma API pública; pacotes de autenticação do ASP.NET Core da versão de cada runtime |
+| .NET | `net10.0` (LTS); pacotes de autenticação do ASP.NET Core 10.0.x |
 | Native AOT / trimming | ✅ `IsAotCompatible` em todos os pacotes: binding de configuração gerado em compilação, JSON do 401/403 com `JsonSerializerContext`, logs por *source generator* |
 | Sem ICU (`InvariantGlobalization`) | ✅ testado no CI (todos os formatos aceitam só ASCII) |
 | Hospedagem | Controllers, Razor Pages, Minimal APIs, gRPC, SignalR (inclusive métodos de hub), Blazor (`AuthorizeRouteView`), workers |
@@ -263,7 +263,7 @@ dotnet test --project TEC.Security.Tests -c Release --treenode-filter "/*/*/*/*[
 dotnet test --project TEC.Security.LoadTests -c Release --treenode-filter "/*/*/*/*[Category=Carga-CI]"      # carga rápida
 ```
 
-190 testes unitários por TFM em `TEC.Security.Tests` (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo
+309 testes unitários em `TEC.Security.Tests` (TUnit + FsCheck: ponta a ponta, fuzzing, DoS, vazamento, tempo
 constante), 8 de carga rápida (`Carga-CI`, no PR e no release junto dos unitários), 3 `Seguranca-Pesada` e 6
 `Carga-Pesada`, estes dois grupos só sob demanda no `performance.yml` manual. Ainda não há testes de integração com um
 provedor de identidade real (a categoria `Integracao` está reservada). Para testar a **sua** API, use o
@@ -271,7 +271,7 @@ provedor de identidade real (a categoria `Integracao` está reservada). Para tes
 
 ## 🤝 Contribuição
 
-Branch a partir da `main` → código **e** testes (inclusive entradas hostis) → `dotnet test` nos dois alvos → CHANGELOG e
+Branch a partir da `main` → código **e** testes (inclusive entradas hostis) → `dotnet test` (também sem ICU) → CHANGELOG e
 `docs/` atualizados → pull request com o check `ci / ci-ok` verde. Como compilar (credencial do feed `tec-interno`,
 modo local com `-p:TecUseLocalProjects=true`): [docs/desenvolvimento.md](docs/desenvolvimento.md).
 

@@ -50,11 +50,20 @@ mesmo código funciona com qualquer provedor OpenID Connect, API key, identidade
 | `tec_client` (`ClientId`) | Aplicação cliente que obteve o token | `ClientId` |
 | `tec_name` (`Name`) | Nome de exibição, saneado | `Name` |
 | `tec_role` / `tec_scope` / `tec_perm` | Um claim por papel, escopo e permissão | `Roles`, `Scopes`, `Permissions` |
-| `tec_normalized` (`Normalized`) | Marca `"1"`: só a identidade criada pelo componente tem | — (sem a marca, a identidade é anônima) |
+| `tec_multi_tenant` (`MultiTenant`) | `"true"` quando a identidade veio de um provedor multi-tenant; a revalidação da sessão o lê | — |
+| `tec_normalized` (`Normalized`) | Marca `"1"`, usada para reconhecer a identidade no cookie do login web | — (não prova nada sozinha; veja abaixo) |
 
 A identidade normalizada usa `tec_name` como `NameClaimType` e `tec_role` como `RoleClaimType`: `User.IsInRole` e
-`[Authorize(Roles = ...)]` enxergam os papéis normalizados. Os claims originais do provedor (exceto os `tec_*`) continuam
-disponíveis em `ISecurityUser.Principal`.
+`[Authorize(Roles = ...)]` enxergam os papéis normalizados. Os claims originais do provedor (exceto os `tec_*`) ficam em
+`ISecurityUser.Principal` quando o provedor os informa em `ExternalIdentity.SourceClaims` (o OpenID Connect não informa).
+
+**O que prova a normalização é o tipo, não a marca.** O `SecurityIdentityFactory` cria uma identidade de um tipo interno,
+que código de fora do componente não instancia. Um `ClaimsPrincipal` montado à mão, por um delegate de evento ou por outro
+esquema de autenticação, mesmo com todos os claims `tec_*` e a marca, é anônimo para o `ISecurityUser`, recusado pelo
+`RunAs` e pelo `RevalidateAsync`, e recebe 403. Depois de criada, a identidade normalizada não aceita incluir nem remover
+claims `tec_*` (`InvalidOperationException`); claims de outros tipos continuam livres, por exemplo num
+`IClaimsTransformation`. `Clone()` preserva o tipo; uma cópia manual (`new ClaimsIdentity(...)`) ou uma ida e volta por
+serialização não: o login web reconstrói a identidade lida do próprio cookie, e só ele.
 
 ### Como a identidade é normalizada
 
@@ -137,7 +146,7 @@ Padrão: `ConfigurationPermissionStore`, com recarga.
 |---|---|
 | `Permissions:Roles` | Identidades de qualquer tenant |
 | `Permissions:Tenants:{tenant}:Roles` | Somente identidades daquele tenant (somadas às de `Roles`); o id do tenant não diferencia maiúsculas e, se não existir no cadastro, a subida registra o aviso 3102 |
-| Papéis da própria identidade | Todos, se `RolesAsPermissions` for `true` (padrão quando não definido; em APIs multi-tenant defina `false`) |
+| Papéis da própria identidade | Todos, se `RolesAsPermissions` for `true` (padrão quando não definido, exceto para identidades de provedor multi-tenant, onde o padrão é `false`) |
 | `Permissions` da API key | A própria chave ([🔑 API keys](api-keys.md)) |
 
 Papéis sem mapeamento não geram permissões. Os nomes de papel são comparados exatamente (diferenciando maiúsculas).
@@ -207,7 +216,9 @@ if (resultado.IsSuccess)
 ```
 
 `RevalidateAsync(principal)` refaz a normalização de um principal já normalizado (tenant e permissões atuais); é o que o
-login web usa para que uma sessão longa reflita tenant desativado e permissão revogada.
+login web usa para que uma sessão longa reflita tenant desativado e permissão revogada. O indicador multi-tenant vai junto
+(claim `tec_multi_tenant`), então o padrão de `RolesAsPermissions` continua o mesmo do login. Um principal que não foi
+criado pela fábrica é recusado.
 
 ---
 
@@ -293,7 +304,8 @@ Para o cliente HTTP, todos viram **401** genérico; o detalhe fica só no log.
 - Todo claim `tec_*` que chega do provedor é **descartado** antes da normalização: um IdP mal configurado (atributo
   mapeado para `tec_perm`) não injeta permissão, tenant nem tipo.
 - `PrincipalKind.System` não pode ser criado por provedores: só por `ISecurityContext.CreateSystemPrincipalAsync`.
-- Uma identidade autenticada por outro mecanismo (sem a marca `tec_normalized`) é tratada como anônima e recebe 403.
+- Uma identidade autenticada por outro mecanismo (que não veio do `SecurityIdentityFactory`, com ou sem a marca
+  `tec_normalized`) é tratada como anônima e recebe 403.
 
 ---
 

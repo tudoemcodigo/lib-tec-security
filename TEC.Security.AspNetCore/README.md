@@ -23,14 +23,14 @@
 
 ## 🎯 Quando usar
 
-Em APIs e sites ASP.NET Core. Normalmente vem junto com um provedor (`TEC.Security.EntraId`); instale direto para usar só
+Em APIs e sites ASP.NET Core. Normalmente vem junto com um provedor (`TEC.Security.OpenIdConnect`); instale direto para usar só
 API keys ou para escrever um provedor novo (`AddJwtBearerProvider`).
 
 ## 📥 Instalação
 
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/tudoemcodigo/index.json -n tec-interno -u <usuario> -p <PAT>
-dotnet add package TEC.Security.AspNetCore --version 0.2.0
+dotnet add package TEC.Security.AspNetCore --version 0.0.1
 ```
 
 O feed do GitHub Packages exige um PAT *classic* com `read:packages`. O pacote traz o `TEC.Security` junto.
@@ -75,4 +75,4 @@ public sealed class PedidosController : ControllerBase
 [Erros](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/erros.md) ·
 [Segurança](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/seguranca.md)
 
-`net8.0` e `net10.0` · Native AOT · [MIT](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código
+`net10.0` · Native AOT · [Apache 2.0](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código

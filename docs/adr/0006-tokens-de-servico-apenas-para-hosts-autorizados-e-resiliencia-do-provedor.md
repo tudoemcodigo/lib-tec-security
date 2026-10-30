@@ -17,7 +17,7 @@ Um token curto (ex.: 5 minutos, padrão do Keycloak) também não pode ser desca
 - A base [`CachingAccessTokenProvider`](../../TEC.Security/Tokens/CachingAccessTokenProvider.cs) para provedores próprios: cache por conjunto de escopos (máximo de 1024), uma obtenção por conjunto ao mesmo tempo, renovação antes da expiração (`min(5 minutos, 1/4 da validade)`), e, se a renovação falhar, o token atual continua em uso enquanto valer mais de 30 segundos (log 3122). Tempo limite sem cancelamento do chamador é falha do provedor.
 - O [`SecurityCircuitBreaker`](../../TEC.Security/Resilience/SecurityCircuitBreaker.cs), sobre `Polly.Core`, abre depois de falhas repetidas (`SecurityCircuitBreakerOptions`: razão 0,5, 10 chamadas, janela e pausa de 30 s), e as chamadas seguintes falham na hora com `SecurityCircuitOpenException`. Cancelamento pedido pelo chamador não abre o circuito; na chamada de teste conta como falha.
 - Falha do provedor sem token utilizável vira [`SecurityTokenAcquisitionException`](../../TEC.Security/Tokens/CachingAccessTokenProvider.cs) (`AppException`, HTTP 502, `SEGURANCA_PROVEDOR_INDISPONIVEL`), com mensagem genérica; a causa fica em `InnerException`. Métricas e traces não levam o token ([`SecurityDiagnostics`](../../TEC.Security/Diagnostics/SecurityDiagnostics.cs)).
-- O provedor de client credentials do OpenID Connect ([`OpenIdConnectAccessTokenProvider`](../../TEC.Security.OpenIdConnect/OpenIdConnectAccessTokenProvider.cs)) usa o mesmo circuit breaker e a mesma margem de renovação, com cache próprio.
+- O provedor de client credentials do OpenID Connect ([`OpenIdConnectAccessTokenProvider`](../../TEC.Security.OpenIdConnect/OpenIdConnectAccessTokenProvider.cs)) herda o `CachingAccessTokenProvider`: mesmo circuit breaker, mesma margem de renovação, mesmo fallback para o token atual e mesmo limite de conjuntos de escopos.
 
 ## Consequências
 ### Positivas
@@ -26,6 +26,10 @@ Um token curto (ex.: 5 minutos, padrão do Keycloak) também não pode ser desca
 - Tokens curtos são reaproveitados.
 
 ### Neutras / Negativas
-- O circuito aberto e o fallback do token atual só valem para quem usa o `CachingAccessTokenProvider`; o provedor OpenID Connect tem cache próprio, sem fallback para o token atual nem limite de conjuntos de escopos, e lança `SecurityCircuitOpenException` diretamente.
+- O circuito aberto e o fallback do token atual valem para todo provedor que herda o `CachingAccessTokenProvider`, inclusive o OpenID Connect; com o circuito aberto e sem token utilizável, o chamador recebe `SecurityTokenAcquisitionException` com `SecurityCircuitOpenException` em `InnerException`.
+- A resposta de sucesso do endpoint de token do provedor OpenID Connect não tem teto de tamanho, e o `HttpClient` do provedor vive no Singleton, fora da rotação de handlers do `IHttpClientFactory`.
 - Todo `AllowedHosts` precisa ser mantido mínimo e sem hosts controlados por terceiros; erro de configuração derruba a chamada com `HttpRequestException`, não envia o token.
 - O `AddOpenIdConnectAccessToken` cria o handler sem logger, então o evento 3121 não é registrado por esse caminho.
+
+## Atualização (2026-10-29)
+Duas consequências acima deixaram de valer. A resposta do endpoint de token agora tem teto de 256 KB (`OpenIdConnectAccessTokenProvider.MaxResponseBytes`): acima disso, pelo `Content-Length` ou durante a leitura, a obtenção falha. E o `AddOpenIdConnectAccessToken` passou a criar o handler com o `ILogger<AccessTokenHandler>` do container, então o evento 3121 é registrado também por esse caminho. A decisão em si não mudou.

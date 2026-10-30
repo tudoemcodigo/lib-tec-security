@@ -6,8 +6,9 @@ using TEC.Security.Abstractions;
 namespace TEC.Security.Claims;
 
 /// <summary>
-/// <see cref="ISecurityUser"/> lido de um <see cref="ClaimsPrincipal"/> normalizado. Sem a marca de normalização
-/// (<see cref="TecClaimTypes.Normalized"/>) ou sem id, a identidade é anônima.
+/// <see cref="ISecurityUser"/> lido de um <see cref="ClaimsPrincipal"/> normalizado. Só vale a identidade criada pelo
+/// <see cref="SecurityIdentityFactory"/> (tipo interno, que outro código não instancia); sem ela, ou sem id, a identidade é
+/// anônima, mesmo que outro principal traga os claims <c>tec_*</c> e a marca <see cref="TecClaimTypes.Normalized"/>.
 /// </summary>
 /// <remarks>Os valores são lidos uma vez, na criação: crie uma instância por principal.</remarks>
 public sealed class SecurityUser : ISecurityUser
@@ -99,8 +100,9 @@ public sealed class SecurityUser : ISecurityUser
     public override string ToString() => IsAuthenticated ? $"SecurityUser {{ Kind = {Kind}, Id = {Id}, TenantId = {TenantId} }}" : "SecurityUser { Anonymous }";
 
     /// <summary>
-    /// A identidade autenticada e normalizada pelo TEC.Security, ou <c>null</c>. Uma identidade com a marca mas criada por outro
-    /// código seria aceita; por isso a marca só é confiável porque os claims <c>tec_*</c> de qualquer provedor são descartados.
+    /// A identidade autenticada e normalizada pelo TEC.Security, ou <c>null</c>. A prova é o tipo (<see cref="NormalizedIdentity"/>,
+    /// criado só pelo <see cref="SecurityIdentityFactory"/>), não a marca <see cref="TecClaimTypes.Normalized"/>: um principal
+    /// forjado por outro código, com a marca e os demais claims <c>tec_*</c>, não é aceito.
     /// </summary>
     internal static ClaimsIdentity? FindNormalizedIdentity(ClaimsPrincipal? principal)
     {
@@ -109,7 +111,7 @@ public sealed class SecurityUser : ISecurityUser
 
         foreach (var identity in principal.Identities)
         {
-            if (identity.IsAuthenticated && identity.HasClaim(TecClaimTypes.Normalized, TecClaimTypes.NormalizedValue))
+            if (identity is NormalizedIdentity { IsAuthenticated: true })
                 return identity;
         }
 

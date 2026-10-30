@@ -87,7 +87,7 @@ builder.Services.AddOpenTelemetry()
 | `security.token.acquire` | Client | Obtenção de token de serviço sem cache por um provedor baseado em `CachingAccessTokenProvider` | `security.provider`, `error.type` e status `Error` em falha |
 
 A validação de tokens de entrada não gera span próprio: o tempo aparece no span HTTP do ASP.NET Core. O provedor OpenID Connect
-(`OpenIdConnect.M2M`) registra a métrica `security.token.acquisition.duration`, mas não inicia este span.
+(`OpenIdConnect.M2M`) herda o `CachingAccessTokenProvider`, então também inicia este span a cada obtenção sem cache.
 
 ### Eventos de log
 
@@ -102,18 +102,18 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | 3110 | Warning | `ApiKeyValidator` | **Auditoria:** API key recusada (motivo e id, nunca o segredo); no máximo um por id + motivo por minuto, com a contagem das omitidas |
 | 3111 | Error | `ApiKeyValidator` | Cadastro recarregado com erro (uma vez por versão): chaves com erro recusadas, as demais valem |
 | 3120 | Error | `CachingAccessTokenProvider` | Falha ao obter token de serviço sem token válido em cache (tipo da exceção) |
-| 3121 | Warning | `AccessTokenHandler` | Requisição bloqueada: destino fora de `AllowedHosts`/sem HTTPS (host). Só com o handler criado com logger (o `AddOpenIdConnectAccessToken` não passa logger) |
+| 3121 | Warning | `AccessTokenHandler` | Requisição bloqueada: destino fora de `AllowedHosts`/sem HTTPS (host). O `AddOpenIdConnectAccessToken` passa o logger; um handler criado à mão só registra se receber um |
 | 3122 | Warning | `CachingAccessTokenProvider` | Renovação falhou; o token atual, ainda válido por mais de 30 s, continua em uso |
 | 3123 | Warning | Circuit breaker | Circuito aberto após falhas repetidas do provedor de identidade (duração da pausa); só com logger no circuito (o provedor OpenID Connect o informa) |
 | 3124 | Information | Circuit breaker | Circuito meio-aberto: chamada de teste |
 | 3125 | Information | Circuit breaker | Circuito fechado: o provedor voltou a responder |
-| 3201 | Information | `TEC.Security.AspNetCore.JwtBearer` | Token recusado (tipo da exceção ou motivo; nunca a mensagem) |
+| 3201 | Information | `TEC.Security.AspNetCore.JwtBearer` | Token recusado (tipo da exceção ou motivo; nunca a mensagem). Inclui `tipo da identidade indeterminado`/`ambíguo` (regras de `Kind`) e delegate de evento que aprovou ou trocou o token/principal |
 | 3202 | Information | Esquemas `TEC.None` e de API key | Credencial recusada (não reconhecida, dois headers de API key, API key sem HTTPS) |
 | 3203 | Information | `TecAuthorizationHandler` | **Auditoria:** acesso negado (endpoint, tipo, id, esquema, tenant, motivo). Sem endpoint, o caminho aparece só como tamanho + HMAC (`SensitiveDataMasker.DescribeUntrusted`) |
 | 3204 | Warning | `TecAuthorizationHandler` | Identidade autenticada sem normalização do TEC.Security |
 | 3205 | Information | `TEC.Security.AspNetCore.WebLogin` | Sessão web recusada na revalidação (motivo); falha passageira do `IPermissionStore` recusa só a requisição e mantém a sessão |
 | 3206 | Information | `EndpointSecurityValidator` | Endpoints conferidos na subida (quantidade) |
-| 3207 | Information | `TEC.Security.AspNetCore.WebLogin` | Login web recusado (tipo ou motivo) |
+| 3207 | Information | `TEC.Security.AspNetCore.WebLogin` | Login web recusado (tipo ou motivo), inclusive delegate do OIDC que aprovou ou trocou a identidade e tentativa de gravar no cookie uma identidade não normalizada |
 
 ### Alertas sugeridos
 
@@ -165,9 +165,11 @@ da classe, ou `TEC.Security.AspNetCore.JwtBearer`, `TEC.Security.AspNetCore.WebL
 > pessoal.
 
 - Mensagens de exceção de validação de token nunca são registradas (podem conter partes do token): só o tipo.
-- A mensagem da exceção de falha do endpoint de token do provedor OpenID Connect inclui o corpo da resposta do IdP e não é
-  registrada pelo componente: ao registrá-la na aplicação, trate-a como dado sensível.
-- Valores do usuário nos logs passam por formatos validados; injeção de linha no log não é possível.
+- A mensagem da exceção de falha do endpoint de token do provedor OpenID Connect traz só o status HTTP, sem o corpo da
+  resposta; a causa original fica em `InnerException` e vai ao log 3120 só pelo tipo.
+- Os valores do usuário nos logs passam por formatos validados. O motivo de recusa por tenant do provedor OpenID Connect
+  (log 3201) não repete o valor do claim de tenant nem do `iss`: traz só o tamanho e um identificador HMAC por processo
+  (`SensitiveDataMasker.DescribeUntrusted`), então uma quebra de linha vinda do IdP não chega ao log.
 
 ---
 

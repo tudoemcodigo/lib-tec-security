@@ -51,13 +51,24 @@ public static class TecClaimTypes
     public const string ClientId = "tec_client";
 
     /// <summary>
-    /// Marca de identidade normalizada: só a identidade criada pelo TEC.Security tem este claim, com o valor
-    /// <see cref="NormalizedValue"/>. Identidades sem a marca são tratadas como anônimas.
+    /// Marca gravada na identidade normalizada, com o valor <see cref="NormalizedValue"/>. Ela só identifica a identidade dentro
+    /// do cookie de sessão do login web; <b>não</b> prova a normalização. A prova é o tipo interno da identidade criada pelo
+    /// <see cref="SecurityIdentityFactory"/>: um principal montado por outro código com este claim continua anônimo.
     /// </summary>
     public const string Normalized = "tec_normalized";
 
     /// <summary>Valor do claim <see cref="Normalized"/>.</summary>
     public const string NormalizedValue = "1";
+
+    /// <summary>
+    /// Indica que a identidade veio de um provedor multi-tenant (<see cref="ExternalIdentity.MultiTenant"/>), com o valor
+    /// <see cref="MultiTenantValue"/>. A revalidação da sessão (<see cref="SecurityIdentityFactory.RevalidateAsync"/>) o lê para
+    /// manter o mesmo padrão de <c>RolesAsPermissions</c> do login.
+    /// </summary>
+    public const string MultiTenant = "tec_multi_tenant";
+
+    /// <summary>Valor do claim <see cref="MultiTenant"/>.</summary>
+    public const string MultiTenantValue = "true";
 
     /// <summary><c>true</c> se o tipo de claim usa o prefixo reservado (comparação sem diferenciar maiúsculas).</summary>
     public static bool IsReserved(string claimType) =>

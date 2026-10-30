@@ -28,11 +28,12 @@ public sealed class SecurityOptions
     /// <c>[TecAuthorize(Permissions = "clientes:escrever")]</c>). Somados às permissões do <c>IPermissionStore</c>.
     /// </summary>
     /// <remarks>
-    /// Padrão (<c>null</c>, não configurado): <c>true</c>, exceto quando a aplicação registra um provedor multi-tenant (ex.:
-    /// <c>AddOpenIdConnectApi</c> ou <c>AddOpenIdConnectWebLogin</c> com <c>MultiTenant = true</c>), em que vale <c>false</c>: o
-    /// administrador de cada tenant cliente atribui qualquer app role aos próprios usuários, e o nome do papel não pode virar
-    /// permissão sem uma decisão explícita. Defina <c>true</c> ou <c>false</c> para fixar o comportamento (<c>true</c> em
-    /// multi-tenant gera o aviso 3403 na inicialização).
+    /// Padrão (<c>null</c>, não configurado): <c>true</c>, exceto para identidades de um provedor multi-tenant (ex.:
+    /// <c>AddOpenIdConnectApi</c> com <c>MultiTenant = true</c>), em que vale <c>false</c>: o administrador de cada tenant cliente
+    /// atribui qualquer app role aos próprios usuários, e o nome do papel não pode virar permissão sem uma decisão explícita. O
+    /// indicador multi-tenant viaja na identidade (claim <c>tec_multi_tenant</c>), então a revalidação da sessão aplica o mesmo
+    /// padrão. Defina <c>true</c> ou <c>false</c> para fixar o comportamento (<c>true</c> com uma identidade multi-tenant gera o
+    /// aviso 3403 uma vez por processo).
     /// </remarks>
     public bool? RolesAsPermissions { get; set; }
 }

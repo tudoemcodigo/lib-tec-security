@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,11 +14,24 @@ namespace TEC.Security.AspNetCore.Authentication;
 /// aplicação ou do provedor que troque <c>OnTokenValidated</c> roda <b>antes</b> e não consegue pular a normalização. Substituir
 /// a instância inteira (<c>Events = new ...</c> ou <c>EventsType</c>) é recusado na validação das opções.
 /// </summary>
+/// <remarks>
+/// Os delegates continuam rodando, mas não aprovam sozinhos (falha fechada): <c>Success()</c> ou um principal definido em
+/// <c>OnMessageReceived</c> (antes da validação do token) ou em <c>OnAuthenticationFailed</c> (depois de o token ser recusado)
+/// viram recusa, e um <c>OnTokenValidated</c> que aprove sozinho ou troque o token ou o principal validado também.
+/// </remarks>
 internal sealed class TecJwtBearerEvents(JwtProviderDefinition definition, SecurityAspNetCoreOptions options) : JwtBearerEvents
 {
     public override async Task MessageReceived(MessageReceivedContext context)
     {
         await base.MessageReceived(context).ConfigureAwait(false);
+
+        // OnMessageReceived só pode dizer onde está o token: aprovar aqui pularia a validação inteira
+        if (context.Result?.Succeeded == true || context.Principal is not null)
+        {
+            Reject(context, Logger(context.HttpContext.RequestServices),
+                "evento OnMessageReceived aprovou ou definiu a identidade antes da validação do token");
+            return;
+        }
 
         // WebSocket/SSE do SignalR: token na query string, somente nos hubs configurados
         if (context.Result is null && context.Token is null && context.Request.Headers.Authorization.Count == 0
@@ -27,6 +41,10 @@ internal sealed class TecJwtBearerEvents(JwtProviderDefinition definition, Secur
 
     public override async Task TokenValidated(TokenValidatedContext context)
     {
+        // O que a validação produziu: um delegate que troque o token ou o principal não consegue normalizar outro conteúdo
+        var validatedToken = context.SecurityToken;
+        var validatedPrincipal = context.Principal;
+
         await base.TokenValidated(context).ConfigureAwait(false);
         var logger = Logger(context.HttpContext.RequestServices);
 
@@ -35,6 +53,12 @@ internal sealed class TecJwtBearerEvents(JwtProviderDefinition definition, Secur
             // Um handler anterior aprovou sozinho: o principal não foi normalizado (claims tec_* do provedor intactos)
             if (context.Result.Succeeded)
                 Reject(context, logger, "evento OnTokenValidated anterior aprovou sem normalização");
+            return;
+        }
+
+        if (!ReferenceEquals(context.SecurityToken, validatedToken) || !ReferenceEquals(context.Principal, validatedPrincipal))
+        {
+            Reject(context, logger, "evento OnTokenValidated trocou o token ou o principal validado");
             return;
         }
 
@@ -78,9 +102,18 @@ internal sealed class TecJwtBearerEvents(JwtProviderDefinition definition, Secur
     public override async Task AuthenticationFailed(AuthenticationFailedContext context)
     {
         await base.AuthenticationFailed(context).ConfigureAwait(false);
+        var logger = Logger(context.HttpContext.RequestServices);
+
         // Só o tipo: a mensagem da exceção pode conter partes do token
-        AspNetCoreSecurityLog.TokenRejected(Logger(context.HttpContext.RequestServices), context.Scheme.Name, context.Exception.GetType().Name);
+        AspNetCoreSecurityLog.TokenRejected(logger, context.Scheme.Name, context.Exception.GetType().Name);
         SecurityDiagnostics.RecordAuthenticationFailure(context.Scheme.Name, "token");
+
+        // Token recusado continua recusado: um delegate não transforma a falha em aprovação
+        if (context.Result?.Succeeded == true || context.Principal is not null)
+        {
+            AspNetCoreSecurityLog.TokenRejected(logger, context.Scheme.Name, "evento OnAuthenticationFailed aprovou um token recusado");
+            context.Fail(context.Exception);
+        }
     }
 
     // Uma instância de eventos por esquema (opções em cache): o logger é criado uma vez, sem consulta ao container por token
@@ -89,7 +122,7 @@ internal sealed class TecJwtBearerEvents(JwtProviderDefinition definition, Secur
     private ILogger Logger(IServiceProvider services) =>
         _logger ??= services.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Security.AspNetCore.JwtBearer");
 
-    private static void Reject(TokenValidatedContext context, ILogger logger, string reason)
+    private static void Reject(ResultContext<JwtBearerOptions> context, ILogger logger, string reason)
     {
         AspNetCoreSecurityLog.TokenRejected(logger, context.Scheme.Name, reason);
         SecurityDiagnostics.RecordAuthenticationFailure(context.Scheme.Name, "identity");

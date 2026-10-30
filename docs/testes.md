@@ -3,8 +3,7 @@
 # 🧪 Testes
 
 > Como testar a **sua** API protegida com o `TEC.Security.Testing` e como o próprio componente é testado: categorias,
-> suítes de segurança, integração com Entra ID e Key Vault reais, carga, benchmarks e as variáveis
-> `TEC_TESTES_*`/`TEC_CARGA_*`.
+> suítes de segurança, carga, benchmarks e as variáveis `TEC_CARGA_*`.
 
 ## 📑 Sumário
 
@@ -14,7 +13,7 @@
   - [Rodar localmente](#rodar-localmente)
   - [Suítes](#suítes)
   - [Testes de segurança](#testes-de-segurança)
-  - [Integração com Entra ID e Key Vault](#integração-com-entra-id-e-key-vault)
+  - [Integração com provedor real](#integração-com-provedor-real)
   - [Carga](#carga)
   - [Benchmarks](#benchmarks)
   - [No CI](#no-ci)
@@ -31,27 +30,23 @@
 ```mermaid
 flowchart LR
     T["dotnet test"] --> U["TEC.Security.Tests<br/>Category != Integracao<br/><sub>unitários, ponta a ponta, fuzzing, DoS, vazamento</sub>"]
-    T --> I["TEC.Security.Tests<br/>Category = Integracao"]
     T --> SP["TEC.Security.Tests<br/>Seguranca-Pesada [Explicit]"]
     T --> L["TEC.Security.LoadTests<br/>Carga-CI · Carga-Pesada [Explicit]"]
-    I --> Q{"TEC_TESTES_TENANT_ID, _SECURITY_ENTRA_*<br/>e credencial (cofre ou segredo)?"}
-    Q -->|sim| E["Entra ID real + Key Vault de testes"]
-    Q -->|não| SK["pulado com o motivo"]
-    U --> R["net8.0 · net10.0 · sem ICU"]
+    U --> R["net10.0 · net10.0 sem ICU"]
     B["dotnet run TEC.Security.Benchmarks"] --> BD["BenchmarkDotNet"]
 ```
 
 | Projeto | Categoria | Conteúdo | Quantidade |
 |---|---|---|---:|
-| `TEC.Security.Tests` | *(sem categoria)* | Unitários, ponta a ponta (TestServer), regressão, fuzzing (FsCheck), DoS, vazamento, tempo constante rápido | 245 por TFM |
-| `TEC.Security.Tests` | `Integracao` | Entra ID e Key Vault reais (pulam sem ambiente) | 2 |
+| `TEC.Security.Tests` | *(sem categoria)* | Unitários, ponta a ponta (TestServer), regressão, fuzzing (FsCheck), DoS, vazamento, tempo constante rápido | 309 |
+| `TEC.Security.Tests` | `Integracao` | Reservada para provedor real; ainda sem testes | 0 |
 | `TEC.Security.Tests` | `Seguranca-Pesada` | Canais laterais de tempo (teste t de Welch) | 3 |
 | `TEC.Security.LoadTests` | `Carga-CI` | Concorrência nos singletons e fumaça de carga HTTP (segundos) | 8 |
 | `TEC.Security.LoadTests` | `Carga-Pesada` | Volume, soak, carga sustentada e inundação (minutos) | 6 |
 | `TEC.Security.Benchmarks` | — | BenchmarkDotNet do caminho quente (sob demanda) | — |
 
 - Framework: **TUnit** sobre o Microsoft.Testing.Platform (`global.json` → `"test": { "runner": "Microsoft.Testing.Platform" }`),
-  com **FsCheck** para as propriedades. Projetos `Exe`, `net8.0` e `net10.0`, fora dos pacotes.
+  com **FsCheck** para as propriedades. Projetos `Exe`, `net10.0`, fora dos pacotes.
 - As categorias ficam numa classe `TestCategories` por projeto: `Integration = "Integracao"` e
   `SecurityHeavy = "Seguranca-Pesada"` em `TEC.Security.Tests`; `LoadCi = "Carga-CI"` e `LoadHeavy = "Carga-Pesada"` em
   `TEC.Security.LoadTests`. A seleção é **sempre por categoria**; os pesados têm `[Explicit]` e só rodam quando a categoria
@@ -72,7 +67,7 @@ provedor de teste impede a aplicação de subir fora de Development, Testing e T
 // Program.cs: o emissor de teste só existe quando os testes o definem
 using TEC.Security.AspNetCore;
 using TEC.Security.DependencyInjection;
-using TEC.Security.EntraId;
+using TEC.Security.OpenIdConnect;
 using TEC.Security.Testing;
 
 builder.Services.AddTecSecurity(builder.Configuration, security =>
@@ -81,7 +76,7 @@ builder.Services.AddTecSecurity(builder.Configuration, security =>
     if (Program.TestIssuer is { } emissor)
         security.AddTestJwt(emissor);   // não sobe fora de Development/Testing/Test
     else
-        security.AddEntraIdApi("Funcionarios", builder.Configuration.GetSection("Security:EntraId:Api"));
+        security.AddOpenIdConnectApi("Funcionarios", builder.Configuration.GetSection("Security:OpenIdConnect:Api"));
 });
 
 public partial class Program
@@ -133,17 +128,11 @@ Casos de erro: `Lifetime`, `IssuedAt` (token expirado ou ainda não válido), `A
 ### Rodar localmente
 
 ```bash
-# Unitários (os dois alvos), como no CI
+# Unitários, como no CI
 dotnet test --project TEC.Security.Tests --treenode-filter "/*/*/*/*[Category!=Integracao]"
-
-# Um alvo só
-dotnet test --project TEC.Security.Tests -f net8.0 --treenode-filter "/*/*/*/*[Category!=Integracao]"
 
 # Sem ICU (como em containers mínimos)
 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 dotnet test --project TEC.Security.Tests -f net10.0 --treenode-filter "/*/*/*/*[Category!=Integracao]"
-
-# Integração (se pula sem ambiente)
-dotnet test --project TEC.Security.Tests -f net10.0 --treenode-filter "/*/*/*/*[Category=Integracao]"
 
 # Uma classe (assembly/namespace/classe/teste)
 dotnet test --project TEC.Security.Tests -f net10.0 --treenode-filter "/*/*/FuzzingTests/*"
@@ -176,15 +165,21 @@ $env:DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1"; dotnet test --project TEC.Secu
 | `TenantRegistryTests` | ❌ | Cadastro, id externo sem diferenciar maiúsculas, duplicidade, recarga válida e inválida, appsettings |
 | `ApiKeyTests` | ❌ | Geração, hash, expiração, formato, log sem segredo, validação do cadastro |
 | `HttpSecurityTests` | ❌ | Ponta a ponta: fechado por padrão, 401/403, `alg:none`, HS256, chave/audiência/validade, emissor desconhecido, headers duplicados, tamanho, SignalR, API key, subida, `RunAs` |
-| `EntraIdApiTests` | ❌ | Tokens no formato Entra v2: tenant por emissor, cadastro com recarga, ID token, `azp`, v1, aplicação, audiência, instância |
+| `OpenIdConnectApiTests` | ❌ | Token OpenID Connect aceito e normalizado, `realm_access` do Keycloak, audiência errada, portas de `AllowedHosts` (SEC-14); ponta a ponta do `Kind` (token sem sinal recusado, `Unresolved`, app do Entra ID sem `idtyp`) e de `MultiTenant = true` (tenant ativo, inativo, desconhecido, papel que não vira permissão, log sem o valor do tenant) |
+| `OpenIdConnectIdentityTests` | ❌ | Regras de `Kind` (sinais padrão, `sub` igual ao client, prefixo, conflito, `Unresolved`, regra do `scp` do Entra ID, `preferred_username` que não decide, regras e seção `Kind` inválidas), `resource_access` só do client alvo (também no login web) e motivo de tenant sem o valor do token |
+| `OpenIdConnectM2MTests` | ❌ | Obtenção e cache do token de client credentials; `expires_in` inválido, ausente, em texto e enorme; resposta acima do teto; corpo que trava cortado pelo tempo limite; status 3xx/4xx sem ler o corpo; opções inválidas impedem a subida; `HttpClient` sem redirecionamento nem cookies; log 3121 do `AccessTokenHandler` |
+| `OpenIdConnectWebLoginTests` | ❌ | Segredo do login web lido do cofre a cada troca do código e no PAR (rotação sem reiniciar), segredo inexistente na subida e cofre fora do ar no login |
+| `EventGuardTests` | ❌ | Delegates que não aprovam sozinhos: `OnMessageReceived`, `OnAuthenticationFailed` e troca de token/principal no `OnTokenValidated` (JWT); `OnMessageReceived`, `OnAuthorizationCodeReceived`, `OnTokenResponseReceived`, `OnAuthenticationFailed`, `OnTokenValidated` e `OnTicketReceived` (OIDC); cookie que reconstrói só a própria identidade e recusa gravar outra |
+| `NormalizedIdentityTests` | ❌ | Principal forjado com todos os claims `tec_*` anônimo (inclusive vindo de outro middleware, 403), claims `tec_*` travados, `Clone`, indicador multi-tenant mantido na revalidação e aviso 3403 uma vez |
+| `SecurityIssueRegressionTests` | ❌ | Uma regressão por issue corrigida (`Issue2` a `Issue13`): registro M2M no container, `PrivateKeyJwt`, tenant pelo emissor, segredo do login web, HTTPS em loopback, `resource_access` isolado, classificação User × Application, ganchos recusados pelo `JwtHardening`, `RolesAsPermissions` em multi-tenant, claims de tenant e papel exclusivos, endpoint M2M em HTTPS |
 | `WebLoginTests` | ❌ | PKCE, 401 para API, `returnUrl`, cookie endurecido |
-| `TokenAndCredentialTests` | ❌ | `AllowedHosts`, cache e renovação, concorrência, client assertion assinada no cofre (falso), credenciais inválidas, código de erro do Entra filtrado |
-| `ResilienceTests` | ❌ | Retentativa do On-Behalf-Of (408/429/5xx, rede, tempo limite, `Retry-After`, erros OAuth nunca repetidos), circuit breaker dos tokens da aplicação e do OBO, assertion nova por tentativa, limites e binding de `Resilience` |
+| `TokenAndCredentialTests` | ❌ | `AllowedHosts`, `Authorization` existente preservado, cache e renovação, concorrência, `returnUrl` |
+| `ResilienceTests` | ❌ | Circuit breaker (cancelamento × tempo limite), token atual mantido com o provedor lento, token curto reaproveitado |
 | `ReviewRegressionTests` | ❌ | Policy pelo `IAuthorizeData`, `PostConfigure`/eventos substituídos, logout de outra origem, permissões por tenant, `RunAs` paralelo, cookies OIDC, header de API key, metadados por HTTP |
-| `HardeningRegressionTests` | ❌ | Hash não canônico, Base64Url do Core, cadastro inválido relido 1×/s, nome de exibição (bidi, surrogates), cache de permissões (uma consulta, cancelamento, chave fixa, `null`), `RunAs` entre containers, registro duplicado, renovação com token atual, `Dispose`, limite de escopos, lista de algoritmos, OIDC, endpoint de token, token federado, `TestTokenIssuer` |
+| `TechnicalReviewRegressionTests` | ❌ | Revisão técnica: tempo limite do store de permissões, revogação de API key com outra chave inválida na edição, sessão web mantida em falha passageira do store, ganchos de enfraquecimento, `FallbackPolicy` e provedor de policies substituídos, log de recusas limitado (com varredura no máximo uma vez por intervalo) |
+| `HardeningRegressionTests` | ❌ | Hash não canônico, Base64Url do Core, cadastro inválido relido 1×/s, nome de exibição (bidi, surrogates), cache de permissões (uma consulta, cancelamento, chave fixa, `null`), `RunAs` entre containers, registro duplicado, renovação com token atual, `Dispose`, limite de escopos, lista de algoritmos, OIDC, `TestTokenIssuer` |
 | `Security/SecurityRegressionTests` | ❌ | Regressões achadas pelos testes de segurança (id externo fora do ASCII) |
 | `Security/Fuzzing/`, `Security/Adversarial/` | ❌ | Veja [Testes de segurança](#testes-de-segurança) |
-| `Integration/EntraIdIntegrationTests` | ✅ | Entra ID e Key Vault reais (categoria `Integracao`) |
 
 </details>
 
@@ -213,39 +208,12 @@ dotnet test --project TEC.Security.Tests -c Release -f net10.0 --treenode-filter
 > diferença relativa das médias (< 5%), não o `|t|`: o id não é segredo e a busca no `Dictionary` (acerto × falha)
 > difere por natureza em poucos nanossegundos; o que precisa ser igual é o SHA-256 e a comparação do segredo.
 
-### Integração com Entra ID e Key Vault
+### Integração com provedor real
 
-`Integration/EntraIdIntegrationTests` obtém um token real de aplicação (client credentials) e chama uma API protegida por
-`AddEntraIdApi`, validada com o JWKS real:
-
-| Teste | Garante |
-|---|---|
-| `Real_application_token_is_accepted_by_the_API_and_normalized` | Token real aceito e normalizado (`Application`, client id, tenant, app role) e nunca registrado em log |
-| `Real_token_issued_for_another_audience_is_rejected` | Token real de outra audiência recusado |
-
-A credencial da aplicação cliente vem primeiro do **Key Vault de testes** (certificado, com a client assertion assinada
-dentro do cofre, ou segredo); com o cofre offline, de um segredo local entregue ao TEC.Vault em memória. Cada valor é
-procurado nesta ordem: variável de ambiente → `dotnet user-secrets` (id `tudoemcodigo-tec-testes`, seção `TecTestes`) →
-`appsettings.Local.json` na saída do projeto (ignorado pelo git). Sem configuração, os testes **se pulam** com o motivo.
-
-```bash
-# Uma vez por máquina (o mesmo id de user-secrets vale para todos os lib-tec-*)
-az login --tenant <tenant-id>
-dotnet user-secrets set TecTestes:TenantId <tenant-id> --id tudoemcodigo-tec-testes
-dotnet user-secrets set TecTestes:VaultUri https://<cofre-de-testes>.vault.azure.net/ --id tudoemcodigo-tec-testes
-dotnet user-secrets set TecTestes:Entra:ApiClientId <client-id-da-api-de-testes> --id tudoemcodigo-tec-testes
-dotnet user-secrets set TecTestes:Entra:ClientId <client-id-do-cliente-de-testes> --id tudoemcodigo-tec-testes
-dotnet user-secrets set TecTestes:Entra:CertificateName <certificado-no-cofre> --id tudoemcodigo-tec-testes
-dotnet user-secrets set TecTestes:Entra:Role <app-role-concedido> --id tudoemcodigo-tec-testes
-```
-
-| Recurso | Permissão mínima |
-|---|---|
-| Cofre exclusivo de testes | Identidade do `az login` (ou do OIDC no CI): **Key Vault Certificate User** + **Crypto User** (certificado) ou **Secrets User** (segredo) |
-| API de testes (app registration) | App role para aplicações (opcional, conferido nas permissões) |
-| Aplicação cliente de testes | Permissão de aplicação na API, com *admin consent* |
-
-O acesso ao cofre usa as credenciais do desenvolvedor (Azure CLI); no CI, o `az login` federado feito pelo workflow.
+Não há testes de integração com um IdP real. A categoria `Integracao` está reservada (`TestCategories.Integration`) e o
+filtro `Category!=Integracao` do CI continua valendo para quando eles existirem. Todos os testes atuais usam o
+`TestTokenIssuer`, um servidor em memória ou um cofre falso; o projeto de testes não referencia cofre real nem lê
+user-secrets.
 
 ### Carga
 
@@ -311,7 +279,7 @@ Ordem de grandeza, não meta: os testes só falham em regressões grosseiras.
 
 ```bash
 dotnet run -c Release --project TEC.Security.Benchmarks -f net10.0 -- --filter "*"
-dotnet run -c Release --project TEC.Security.Benchmarks -f net10.0 -- --filter "*ApiKey*" --runtimes net8.0 net10.0
+dotnet run -c Release --project TEC.Security.Benchmarks -f net10.0 -- --filter "*ApiKey*"
 dotnet run -c Release --project TEC.Security.Benchmarks -f net10.0 -- --filter "*Http*" --job short
 ```
 
@@ -321,8 +289,8 @@ Resultados em `BenchmarkDotNet.Artifacts/results`. No CI, só pelo `performance.
 
 | Evento | Testes | Workflow |
 |---|---|---|
-| Pull request / merge queue | Unitários e `Carga-CI` (`net10.0` com cobertura, `net8.0`, sem ICU) e `Integracao` (se pula: sem OIDC em PR) | `ci.yml` |
-| `main` (push, agendado segunda 06:00 UTC / manual) | Os mesmos, com Entra ID e Key Vault reais via OIDC; no push, depois do `ci-ok`, a prévia é publicada | `ci.yml` |
+| Pull request / merge queue | Unitários e `Carga-CI` (`net10.0` com cobertura e `net10.0` sem ICU) | `ci.yml` |
+| `main` (push, agendado segunda 06:00 UTC / manual) | Os mesmos; no push, depois do `ci-ok`, a prévia é publicada | `ci.yml` |
 | Manual (**Performance**) | `suite` = `pesadas` (padrão: `Carga-Pesada` + `Seguranca-Pesada`), `rapida` (`Carga-CI`) ou `todas`; benchmarks opcionais | `performance.yml` |
 | Publicar versão | Unitários e `Carga-CI` (matriz + cobertura), antes da tag | `release.yml` |
 
@@ -349,30 +317,21 @@ Variables e parâmetros: [⚙️ CI/CD](../.github/workflows/README.md).
 
 ## ⚙️ Opções
 
-| Variável | Chave (user-secrets / `appsettings.Local.json`) | Padrão | Uso |
-|---|---|---|---|
-| `TEC_TESTES_TENANT_ID` | `TecTestes:TenantId` | nenhum (pula) | Tenant do Entra ID (compartilhada pelos componentes) |
-| `TEC_TESTES_VAULT_URI` | `TecTestes:VaultUri` | nenhum | Key Vault de testes com a credencial da aplicação cliente |
-| `TEC_TESTES_SECURITY_ENTRA_API_CLIENT_ID` | `TecTestes:Entra:ApiClientId` | nenhum (pula) | App registration da API de testes |
-| `TEC_TESTES_SECURITY_ENTRA_CLIENT_ID` | `TecTestes:Entra:ClientId` | nenhum (pula) | App registration da aplicação cliente |
-| `TEC_TESTES_SECURITY_ENTRA_CERTIFICATE_NAME` | `TecTestes:Entra:CertificateName` | nenhum | Certificado da aplicação cliente no cofre (preferido) |
-| `TEC_TESTES_SECURITY_ENTRA_CLIENT_SECRET_NAME` | `TecTestes:Entra:ClientSecretName` | nenhum | Segredo da aplicação cliente no cofre (alternativa) |
-| `TEC_TESTES_SECURITY_ENTRA_CLIENT_SECRET` | `TecTestes:Entra:ClientSecret` | nenhum | Fallback com o cofre offline: valor do segredo, entregue ao TEC.Vault em memória (certificado não tem fallback) |
-| `TEC_TESTES_SECURITY_ENTRA_ROLE` | `TecTestes:Entra:Role` | nenhum | App role esperado nas permissões |
-| `TEC_TESTES_SECURITY_ENTRA_ACCEPT_V1` | `TecTestes:Entra:AcceptV1` | `false` | API que ainda emite tokens v1 |
-| `TEC_CARGA_SOAK_SEGUNDOS` | — | `120` | Duração do soak |
-| `TEC_CARGA_API_SEGUNDOS` | — | `60` | Duração da carga sustentada na API |
-| `TEC_CARGA_API_CONCORRENCIA` | — | `64` | Conexões simultâneas na carga sustentada e na inundação |
-| `TEC_CARGA_TENANTS` | — | `100000` | Tenants no teste de volume do cadastro |
-| `TEC_CARGA_IDENTIDADES` | — | `200000` | Identidades no teste de volume do cache |
-| `TEC_CARGA_RELATORIOS` | — | nenhum | Pasta onde os testes de carga acrescentam `carga.md` (o CI define e publica) |
-| `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT` | — | — | `1` roda sem ICU |
+| Variável | Padrão | Uso |
+|---|---|---|
+| `TEC_CARGA_SOAK_SEGUNDOS` | `120` | Duração do soak |
+| `TEC_CARGA_API_SEGUNDOS` | `60` | Duração da carga sustentada na API |
+| `TEC_CARGA_API_CONCORRENCIA` | `64` | Conexões simultâneas na carga sustentada e na inundação |
+| `TEC_CARGA_TENANTS` | `100000` | Tenants no teste de volume do cadastro |
+| `TEC_CARGA_IDENTIDADES` | `200000` | Identidades no teste de volume do cache |
+| `TEC_CARGA_RELATORIOS` | nenhum | Pasta onde os testes de carga acrescentam `carga.md` (o CI define e publica) |
+| `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT` | — | `1` roda sem ICU |
 
 Valores `TEC_CARGA_*` inválidos ou vazios usam o padrão.
 
 > [!NOTE]
-> Variáveis antigas **removidas**: `TEC_TESTES_INTEGRACAO`, `TEC_SECURITY_ENTRA_INTEGRACAO` (não há mais liga/desliga: a
-> seleção é por categoria) e `TEC_SECURITY_ENTRA_*`, renomeadas para `TEC_TESTES_SECURITY_ENTRA_*`.
+> As variáveis `TEC_TESTES_*` e `TEC_SECURITY_ENTRA_*` das versões anteriores deste documento não são lidas por nenhum
+> teste atual.
 
 ---
 
@@ -381,22 +340,19 @@ Valores `TEC_CARGA_*` inválidos ou vazios usam o padrão.
 | Sintoma | Quando ocorre | O que fazer |
 |---|---|---|
 | `dotnet test` roda **0 testes** e sai com código 5 | `-nologo` (ou filtro que não casa nada) | Remova `-nologo`; confira o `--treenode-filter` |
-| Integração pulada: `Integração Entra ID não configurada: defina TEC_TESTES_TENANT_ID, TEC_TESTES_SECURITY_ENTRA_API_CLIENT_ID e ...` | Faltam tenant ou app registrations | Configure as variáveis ou o user-secrets |
-| Integração pulada: `Sem credencial da aplicação cliente (Key Vault: ...)` | Cofre não configurado, inacessível, sem o item ou sem `CertificateName`/`ClientSecretName`, e sem segredo local | Leia o motivo do cofre; `az login`; papéis no cofre; ou defina o segredo local |
 | Os pesados não rodam | `[Explicit]`: só com a categoria | `--treenode-filter "/*/*/*/*[Category=Carga-Pesada]"` |
-| Teste de tempo/memória falhou uma vez | CPU disputada (os dois alvos em paralelo, outros programas) | Repita em Release com `-f net10.0` e a máquina ociosa |
+| Teste de tempo/memória falhou uma vez | CPU disputada (outros programas, testes em paralelo) | Repita em Release com a máquina ociosa |
 | `HTTP 431` num cenário de carga | Header acima do limite do Kestrel (32 KB) | Cenários de token grande ficam entre `MaxTokenLength` e o limite do Kestrel |
-| Testes `net8.0` não rodam | Runtimes .NET 8 / ASP.NET Core 8 ausentes | Instale-os ou use `-f net10.0` |
 
 ---
 
 ## 🛡️ Segurança
 
 > [!CAUTION]
-> Use app registrations e cofre **exclusivos de testes**, sem dados reais e sem permissões em recursos de produção.
+> Quando existirem testes de integração, use app registrations e cofre **exclusivos de testes**, sem dados reais e sem
+> permissões em recursos de produção.
 
-- A identidade de CI (OIDC) só existe na `main`, fora de pull request; em PR os testes de integração se pulam.
-- Nenhum recurso real tem valor padrão no código: sem configuração, o teste se pula com o motivo.
+- Nenhum teste atual acessa serviço externo: tokens, chaves e servidores são criados em memória.
 - O `TestTokenIssuer` gera a chave na memória do processo e não grava nada; `AddTestJwt` impede a subida em produção.
 
 ---
@@ -416,14 +372,6 @@ relógio controlado, passe um `TimeProvider` falso no construtor: `new TestToken
 
 Sim: `new TestTokenIssuer("https://emissor.meu-teste/", "api://minha-api")`. Valores vazios lançam `ArgumentException`.
 Depois do `Dispose`, `CreateToken` lança `ObjectDisposedException`.
-
-</details>
-
-<details>
-<summary>Por que os testes de integração aparecem como pulados no meu PR?</summary>
-
-O login OIDC no Azure só acontece na `main`, fora de pull request; sem ele, as variáveis do Entra ID e do cofre não chegam
-aos testes.
 
 </details>
 

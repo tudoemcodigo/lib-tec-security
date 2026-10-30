@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Provedor de autenticação e autorização OpenID Connect e OAuth 2.0 agnóstico para .NET 8 e .NET 10 (Keycloak, Auth0, Okta, Microsoft Entra ID via OIDC, AWS Cognito), com descoberta automática JWKS, login web seguro e cliente M2M Client Credentials.</Description>
+    <Description>Provedor de autenticação e autorização OpenID Connect e OAuth 2.0 agnóstico para .NET 10 (Keycloak, Auth0, Okta, Microsoft Entra ID via OIDC, AWS Cognito), com descoberta automática JWKS, login web seguro e cliente M2M Client Credentials.</Description>
     <PackageTags>security;authentication;authorization;openid;oidc;oauth2;jwt;keycloak;auth0;okta;m2m</PackageTags>
   </PropertyGroup>
 

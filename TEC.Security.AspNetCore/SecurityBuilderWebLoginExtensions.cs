@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -32,11 +33,18 @@ public static class SecurityBuilderWebLoginExtensions
     /// validados, tokens não guardados no cookie, cookie <c>__Host-</c> HttpOnly/Secure/SameSite=Lax, sessão revalidada
     /// (tenant a cada requisição; tenant, permissões e regra do provedor a cada <see cref="WebLoginDefinition.RevalidationInterval"/>),
     /// duração máxima absoluta (<see cref="WebLoginDefinition.MaxSessionLifetime"/>) e 401/403 em vez de redirecionamento para
-    /// chamadas de API (sem <c>Accept: text/html</c>). Uso pelos pacotes de provedor (ex.: <c>AddEntraIdWebLogin</c>).
+    /// chamadas de API (sem <c>Accept: text/html</c>). Uso pelos pacotes de provedor (ex.: <c>AddOpenIdConnectWebLogin</c>).
     /// </summary>
     /// <remarks>
     /// <para>O cookie é protegido pelo Data Protection do ASP.NET Core: com mais de uma instância, persista as chaves em local
-    /// compartilhado e protegido (ex.: <c>PersistKeysToAzureBlobStorage</c> + <c>ProtectKeysWithAzureKeyVault</c>).</para>
+    /// compartilhado e protegido (ex.: <c>PersistKeysToAzureBlobStorage</c> + <c>ProtectKeysWithAzureKeyVault</c>). Só a
+    /// identidade normalizada entra no cookie, e só ela é reconstruída na leitura; não troque o <c>TicketDataFormat</c> por um
+    /// formato sem essa proteção.</para>
+    /// <para>Os delegates de evento do OIDC e do cookie continuam rodando, mas não aprovam sozinhos: <c>Success()</c> ou um
+    /// principal trocado antes da normalização (<c>OnMessageReceived</c>, <c>OnAuthorizationCodeReceived</c>,
+    /// <c>OnTokenResponseReceived</c>, <c>OnAuthenticationFailed</c>, <c>OnTokenValidated</c>) ou depois dela
+    /// (<c>OnTicketReceived</c>) recusam o login, e gravar no cookie uma identidade que não veio do
+    /// <see cref="SecurityIdentityFactory"/> lança <see cref="InvalidOperationException"/>.</para>
     /// <para>CSRF: <c>SameSite=Lax</c> bloqueia POSTs de outros sites com o cookie na maioria dos navegadores; em formulários use
     /// também o antiforgery do ASP.NET Core.</para>
     /// </remarks>
@@ -263,9 +271,32 @@ internal sealed class TecCookieEvents(WebLoginDefinition definition) : CookieAut
 {
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
+        // O cookie é cifrado e autenticado pelo Data Protection e só recebe identidade normalizada (SigningIn): a identidade lida
+        // dele é reconstruída antes do delegate da aplicação, e o que o delegate puser no lugar só passa se também for normalizado
+        if (context.Principal is not null && NormalizedIdentity.RestoreTrusted(context.Principal) is { } restored
+            && !ReferenceEquals(restored, context.Principal))
+            context.ReplacePrincipal(restored);
+
         await base.ValidatePrincipal(context).ConfigureAwait(false);
         if (context.Principal is not null)
             await SecurityBuilderWebLoginExtensions.ValidateSessionAsync(context, definition).ConfigureAwait(false);
+    }
+
+    public override async Task SigningIn(CookieSigningInContext context)
+    {
+        await base.SigningIn(context).ConfigureAwait(false);
+
+        // A leitura do cookie confia no conteúdo (RestoreTrusted): por isso só a identidade criada pelo SecurityIdentityFactory
+        // pode ser gravada nele, venha a chamada do OIDC, de um delegate ou de um SignInAsync da aplicação
+        var user = new SecurityUser(context.Principal);
+        if (!user.IsAuthenticated || user.Kind != TEC.Core.Security.PrincipalKind.User)
+        {
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Security.AspNetCore.WebLogin");
+            AspNetCoreSecurityLog.RemoteLoginRejected(logger, definition.Scheme, "identidade sem normalização ao gravar o cookie de sessão");
+            SecurityDiagnostics.RecordAuthenticationFailure(definition.Scheme, "session");
+            throw new InvalidOperationException(
+                $"Esquema '{definition.Scheme}': o cookie de sessão só aceita a identidade de usuário criada pelo TEC.Security (SecurityIdentityFactory).");
+        }
     }
 
     public override Task RedirectToAccessDenied(RedirectContext<CookieAuthenticationOptions> context)
@@ -286,7 +317,10 @@ internal sealed class TecCookieEvents(WebLoginDefinition definition) : CookieAut
     }
 }
 
-/// <summary>Eventos do OIDC do login web (métodos sobrescritos: trocar os delegates não pula a normalização).</summary>
+/// <summary>
+/// Eventos do OIDC do login web (métodos sobrescritos: trocar os delegates não pula a normalização). Os delegates rodam antes e
+/// não aprovam sozinhos: <c>Success()</c> ou principal trocado antes da normalização recusam o login (falha fechada).
+/// </summary>
 internal sealed class TecOpenIdConnectEvents(WebLoginDefinition definition) : OpenIdConnectEvents
 {
     public override async Task RedirectToIdentityProvider(RedirectContext context)
@@ -303,17 +337,59 @@ internal sealed class TecOpenIdConnectEvents(WebLoginDefinition definition) : Op
         await base.RedirectToIdentityProvider(context).ConfigureAwait(false);
     }
 
+    // Antes do ID token ser validado, nenhum evento pode aprovar o login nem definir a identidade
+
+    public override async Task MessageReceived(MessageReceivedContext context)
+    {
+        var principal = context.Principal;
+        await base.MessageReceived(context).ConfigureAwait(false);
+        RejectEarlyApproval(context, principal, "OnMessageReceived");
+    }
+
+    public override async Task AuthorizationCodeReceived(AuthorizationCodeReceivedContext context)
+    {
+        var principal = context.Principal;
+        await base.AuthorizationCodeReceived(context).ConfigureAwait(false);
+        RejectEarlyApproval(context, principal, "OnAuthorizationCodeReceived");
+    }
+
+    public override async Task TokenResponseReceived(TokenResponseReceivedContext context)
+    {
+        var principal = context.Principal;
+        await base.TokenResponseReceived(context).ConfigureAwait(false);
+        RejectEarlyApproval(context, principal, "OnTokenResponseReceived");
+    }
+
+    public override async Task AuthenticationFailed(AuthenticationFailedContext context)
+    {
+        var principal = context.Principal;
+        await base.AuthenticationFailed(context).ConfigureAwait(false);
+        RejectEarlyApproval(context, principal, "OnAuthenticationFailed");
+    }
+
     public override async Task TokenValidated(TokenValidatedContext context)
     {
+        // O que a validação produziu: um delegate que troque o token, o principal ou o nonce não consegue normalizar outro conteúdo
+        var validatedToken = context.SecurityToken;
+        var validatedPrincipal = context.Principal;
+        string? validatedNonce = context.Nonce;
+
         await base.TokenValidated(context).ConfigureAwait(false);
         var services = context.HttpContext.RequestServices;
-        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Security.AspNetCore.WebLogin");
+        var logger = Logger(context.HttpContext);
 
         if (context.Result is not null)
         {
             // Um handler anterior concluiu sozinho: o principal não foi normalizado
             if (context.Result.Succeeded)
                 Reject(context, logger, "evento OnTokenValidated anterior aprovou sem normalização");
+            return;
+        }
+
+        if (!ReferenceEquals(context.SecurityToken, validatedToken) || !ReferenceEquals(context.Principal, validatedPrincipal)
+            || !string.Equals(context.Nonce, validatedNonce, StringComparison.Ordinal))
+        {
+            Reject(context, logger, "evento OnTokenValidated trocou o token, o principal ou o nonce validados");
             return;
         }
 
@@ -349,6 +425,27 @@ internal sealed class TecOpenIdConnectEvents(WebLoginDefinition definition) : Op
         context.Properties.Items[SecurityBuilderWebLoginExtensions.SignedInAtKey] = now;
     }
 
+    public override async Task TicketReceived(TicketReceivedContext context)
+    {
+        // Principal normalizado no TokenValidated: entre ele e o cookie, nenhum delegate pode trocá-lo
+        var normalized = context.Principal;
+        await base.TicketReceived(context).ConfigureAwait(false);
+
+        // O delegate respondeu ou pulou: não há SignIn
+        if (context.Result is { Handled: true } or { Skipped: true })
+            return;
+
+        if (ReferenceEquals(context.Principal, normalized) && SecurityUser.FindNormalizedIdentity(context.Principal) is not null)
+            return;
+
+        AspNetCoreSecurityLog.RemoteLoginRejected(Logger(context.HttpContext), definition.ChallengeScheme,
+            "evento OnTicketReceived trocou a identidade normalizada");
+        SecurityDiagnostics.RecordAuthenticationFailure(definition.ChallengeScheme, "identity");
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        context.HandleResponse();
+        await TecAuthorizationResultHandler.WriteBodyAsync(context.HttpContext).ConfigureAwait(false);
+    }
+
     public override async Task RemoteFailure(RemoteFailureContext context)
     {
         await base.RemoteFailure(context).ConfigureAwait(false);
@@ -356,12 +453,24 @@ internal sealed class TecOpenIdConnectEvents(WebLoginDefinition definition) : Op
             return;
 
         // Sem página de erro com detalhes do provedor: só o tipo no log e 401 genérico
-        var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Security.AspNetCore.WebLogin");
-        AspNetCoreSecurityLog.RemoteLoginRejected(logger, definition.ChallengeScheme, context.Failure?.GetType().Name ?? "desconhecido");
+        AspNetCoreSecurityLog.RemoteLoginRejected(Logger(context.HttpContext), definition.ChallengeScheme,
+            context.Failure?.GetType().Name ?? "desconhecido");
         SecurityDiagnostics.RecordAuthenticationFailure(definition.ChallengeScheme, "remote");
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         context.HandleResponse();
         await TecAuthorizationResultHandler.WriteBodyAsync(context.HttpContext).ConfigureAwait(false);
+    }
+
+    /// <summary>Recusa o login se o delegate aprovou (<c>Success()</c>) ou trocou o principal antes da normalização.</summary>
+    private void RejectEarlyApproval(RemoteAuthenticationContext<OpenIdConnectOptions> context, ClaimsPrincipal? principal, string eventName)
+    {
+        if (context.Result?.Succeeded != true && ReferenceEquals(context.Principal, principal))
+            return;
+
+        AspNetCoreSecurityLog.RemoteLoginRejected(Logger(context.HttpContext), definition.ChallengeScheme,
+            "evento " + eventName + " aprovou ou definiu a identidade antes da normalização");
+        SecurityDiagnostics.RecordAuthenticationFailure(definition.ChallengeScheme, "identity");
+        context.Fail("Login recusado.");
     }
 
     private void Reject(TokenValidatedContext context, ILogger logger, string reason)
@@ -370,4 +479,7 @@ internal sealed class TecOpenIdConnectEvents(WebLoginDefinition definition) : Op
         SecurityDiagnostics.RecordAuthenticationFailure(definition.ChallengeScheme, "identity");
         context.Fail("Login recusado.");
     }
+
+    private static ILogger Logger(HttpContext context) =>
+        context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Security.AspNetCore.WebLogin");
 }

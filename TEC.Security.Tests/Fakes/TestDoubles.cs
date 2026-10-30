@@ -92,6 +92,33 @@ internal sealed class CountingTokenProvider(TimeProvider clock, TimeSpan lifetim
     }
 }
 
+/// <summary>Cofre de segredos falso: o valor pode ser trocado (rotação) ou retirado (falha do cofre).</summary>
+internal sealed class FakeSecretReader(string? value) : ISecretReader
+{
+    public string? Value { get; set; } = value;
+
+    public int Reads;
+
+    public string ProviderName => "Fake";
+
+    public Task<Result<TEC.Vault.Secrets.VaultSecret>> GetSecretAsync(string name, string? version = null, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref Reads);
+        return Task.FromResult(Value is { } secret
+            ? Result.Success(new TEC.Vault.Secrets.VaultSecret(new TEC.Vault.Secrets.SecretProperties { Name = name, Version = "1", Enabled = true }, secret))
+            : Result.Failure<TEC.Vault.Secrets.VaultSecret>(Error.NotFound("VAULT_ITEM_NAO_ENCONTRADO", "Segredo não encontrado.")));
+    }
+
+    public Task<Result<bool>> ExistsAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success(Value is not null));
+
+    public Task<Result<IReadOnlyList<TEC.Vault.Secrets.SecretProperties>>> ListSecretsAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<Result<IReadOnlyList<TEC.Vault.Secrets.SecretProperties>>> ListSecretVersionsAsync(string name, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>Relógio manual.</summary>
 internal sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
 {

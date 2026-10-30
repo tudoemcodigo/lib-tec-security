@@ -39,7 +39,8 @@ flowchart LR
   entradas com erro falham fechadas (id fora do formato, vazio ou repetido com outra grafia: tenant sai do cadastro;
   provedor ou id externo fora do formato: tenant inativo; id externo em dois tenants: deixa de ser resolvido).
 - Com `MultiTenant = true` no `AddOpenIdConnectApi`, o cadastro também decide **quais tenants do provedor são aceitos** na
-  validação do token ([🪪 Provedor Entra ID](provedor-entra-id.md#multi-tenant)).
+  validação do token ([🪪 Provedor Entra ID](provedor-entra-id.md#multi-tenant)). O motivo da recusa, que vai para o log,
+  nunca traz o valor do claim de tenant do token: só o tamanho e um identificador.
 
 | Situação | `RequireTenant = false` (padrão) | `RequireTenant = true` |
 |---|---|---|
@@ -179,8 +180,8 @@ builder.Services.AddTecSecurity(builder.Configuration, security => security
 
 `TenantInfo(string Id, string? Name, bool Enabled)` · `ICurrentTenant` (Scoped): `Id`, `Info`.
 
-`ConfigurationTenantRegistry` (padrão, `IDisposable`): snapshot imutável trocado por inteiro a cada recarga válida;
-consultas sem bloqueio.
+`ConfigurationTenantRegistry` (padrão, `IDisposable`): snapshot imutável trocado por inteiro a cada recarga (a versão com
+erro também, aplicada por entrada); consultas sem bloqueio.
 
 ---
 
@@ -203,13 +204,15 @@ consultas sem bloqueio.
 
 > [!WARNING]
 > Em APIs multi-tenant, o administrador de cada tenant cliente consegue atribuir **qualquer** app role da sua app aos
-> próprios usuários. Defina `RolesAsPermissions: false` (o padrão, quando não definido, é `true`) e deixe permissões
-> privilegiadas só em `Security:Permissions:Tenants:<tenant-da-sua-empresa>:Roles`.
+> próprios usuários. Com `MultiTenant = true` o `RolesAsPermissions` já é `false` quando não definido (`true`, nos outros
+> casos), inclusive depois da revalidação da sessão (o indicador viaja na identidade, no claim `tec_multi_tenant`):
+> mantenha `false` e deixe permissões privilegiadas só em `Security:Permissions:Tenants:<tenant-da-sua-empresa>:Roles`.
 
 - Falha fechada na recarga: um `appsettings` quebrado não libera nem bloqueia tenants por engano.
 - Para o cliente, tenant não permitido é indistinguível de credencial inválida (401 genérico): não revela quais tenants
   existem.
-- Erros de cadastro nunca contêm ids externos.
+- Erros de cadastro nunca contêm ids externos, e a recusa de um tenant vindo do token também não (log com tamanho e
+  identificador, nunca o valor).
 
 ---
 

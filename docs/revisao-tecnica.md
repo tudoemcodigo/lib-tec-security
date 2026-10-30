@@ -5,6 +5,14 @@
 > Revisão de segurança, código, organização e documentação dos quatro pacotes do TEC.Security, com cada achado conferido
 > no fonte (`arquivo:linha`), o cenário concreto de impacto e a correção sugerida.
 
+> [!NOTE]
+> Relatório histórico de 2026-10-19, sobre o commit `e07991e` (versão `0.1.0`, quando o repositório tinha o pacote
+> `TEC.Security.EntraId`, com On-Behalf-Of e credenciais por certificado). O código atual tem os quatro pacotes
+> `TEC.Security`, `TEC.Security.AspNetCore`, `TEC.Security.OpenIdConnect` e `TEC.Security.Testing`, versão `0.0.1`. Os
+> achados, as linhas, as contagens de testes e as referências a `EntraId` abaixo descrevem aquele commit e não valem como
+> estado atual sem nova verificação. O alvo `net8.0` citado (SEC-04, SEC-17 e os unitários `net8.0`) também saiu: o código
+> atual compila só para `net10.0`.
+
 ## 📑 Sumário
 
 - [🎯 Escopo e método](#-escopo-e-método)

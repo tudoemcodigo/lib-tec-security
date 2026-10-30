@@ -39,17 +39,17 @@ flowchart LR
 |---|---|
 | **Nunca confiar, sempre verificar** | Todo token é validado por inteiro; nada lido antes da validação decide acesso; claims do provedor não viram tenant nem permissão sem passar pelo cadastro |
 | **Fechado por padrão** | `FallbackPolicy`; credencial não reconhecida = 401; configuração insegura = aplicação não sobe |
-| **Menor privilégio** | Permissões explícitas; escopo × permissão; `Kinds`; `AllowedClientApplications`; token de serviço só para `AllowedHosts` |
-| **Sem segredo na aplicação** | Identidade gerenciada federada / Workload Identity; certificado assinando no cofre; API key só como hash |
+| **Menor privilégio** | Permissões explícitas; escopo × permissão; `Kinds`; token de serviço só para `AllowedHosts` |
+| **Sem segredo na aplicação** | Client secret só pelo TEC.Vault (`ClientSecretName`); API key só como hash |
 | **Assumir violação** | Nada de token/segredo em log; respostas genéricas; tenant e permissões revalidados na sessão; auditoria de negações |
 
 | O componente garante | Quem usa é responsável por |
 |---|---|
-| Validação de token endurecida e não desligável | Configurar a app registration (assignment required, tokens v2, app roles) |
+| Validação de token endurecida e não desligável | Configurar o IdP (no Entra ID: assignment required, tokens v2, app roles; no Keycloak: audiência, mappers de papéis e a regra de `Kind` das contas de serviço) |
 | Fechado por padrão | Não marcar `[AllowAnonymous]` sem necessidade |
 | Tenant só do cadastro | **Filtrar dados por tenant** na camada de dados (autorização não isola dados) |
-| Identidade estável (`oid`) | Usar `ICurrentUser.Id` em auditoria, nunca nome/e-mail |
-| Credencial sem segredo por padrão | Não usar `ClientSecret` quando houver alternativa; RBAC mínimo no cofre |
+| Identidade estável (`sub`) | Usar `ICurrentUser.Id` em auditoria, nunca nome/e-mail |
+| Segredo do cliente fora da configuração (`ClientSecretName` no TEC.Vault) | Não usar `ClientSecret` direto; RBAC mínimo no cofre |
 | Nada de token/segredo nos logs do componente | Não registrar `Authorization`, `X-Api-Key` e `access_token` em logs de acesso, proxies e APM |
 | `AllowedHosts` nos tokens de serviço | Manter a lista mínima |
 | Limites de tamanho e quantidade | **Rate limiting** nos endpoints públicos, de login e de API key |
@@ -71,13 +71,13 @@ Os testes citados ficam em `TEC.Security.Tests` ([🧪 Testes](testes.md)).
 | Confusão de algoritmo (HS256 com a chave pública como segredo) | Lista de **permissão**: só RS\*, PS\*, ES\* (nomes curtos e URIs); HMAC nunca nos esquemas do TEC.Security; nomes desconhecidos recusados | `HS256_token_signed_with_arbitrary_key_is_rejected`, `Jwt_enforcement_rejects_HMAC_in_any_spelling_and_unknown_algorithms`, `Oidc_enforcement_rejects_HMAC_uri_and_saved_tokens` |
 | `AlgorithmValidator` personalizado contornando a lista | Recusado na subida | `Jwt_enforcement_accepts_asymmetric_algorithms_and_rejects_custom_algorithm_validator` |
 | Chave do atacante via `jku`/`x5u`/`jwk` | Chaves só do JWKS do emissor configurado; `TryAllIssuerSigningKeys = false` | `Token_from_another_key_expired_or_for_another_audience_is_rejected` |
-| Token de outra API | `ValidAudiences` obrigatório; `RequireAudience` | idem; `EntraIdApiTests.Audience_of_another_API_is_rejected` |
-| **ID token usado como access token** | Exige `scp` ou `roles`, `azp`/`appid`, recusa `nonce`; sem `scp`, só aplicação com `idtyp=app` ou `sub == oid` | `ID_token_without_scp_or_roles_is_rejected_as_access_token`, `ID_token_with_roles_does_not_become_application_identity` |
-| Tenant não autorizado ("aceita todos") | Emissor exato `/{tid}/v2.0` + `tid` ativo no cadastro ou lista fixa; nunca `common` | `Unregistered_or_inactive_tenant_is_rejected`, `TenantId_common_or_missing_without_MultiTenant_prevents_startup` |
-| `tid` liberado com emissor de outro tenant | Emissor comparado com o `tid` do próprio token | `Issuer_of_a_tenant_other_than_tid_is_rejected` |
-| Aplicação cliente não autorizada | `AllowedClientApplications` (`azp`/`appid`) | `Client_application_outside_the_list_is_rejected` |
+| Token de outra API | `ValidAudiences` obrigatório; `RequireAudience` | idem; `OpenIdConnectApiTests.Wrong_audience_is_rejected_with_401` |
+| **ID token usado como access token** | **Sem controle**: o provedor não distingue ID token de access token. Use audiência exclusiva da API ([risco residual](#-erros)) | Nenhuma |
+| Tenant não autorizado ("aceita todos") | Com `MultiTenant`, o tenant (claim ou `iss`) precisa estar ativo no cadastro; `RequireTenant` recusa a identidade sem tenant | `RequireTenant_rejects_identity_without_registered_tenant`, `Inactive_tenant_is_rejected`, `OpenIdConnectApiTests.MultiTenant_accepts_only_active_registered_tenant` |
+| Emissor de outro tenant com a chave do emissor configurado | Só vale com `MultiTenant` e se o `iss` estiver em `ValidIssuers`; **não** há conferência do `iss` contra o `tid` do token | Nenhuma |
 | JWKS por HTTP | `RequireHttpsMetadata` obrigatório | `HTTP_metadata_prevents_startup` |
-| Configuração tardia (`PostConfigure`, troca de `Events`) desligando a validação ou pulando a normalização | `IValidateOptions` depois de toda configuração; normalização em métodos sobrescritos; aprovação antecipada vira recusa | `PostConfigure_disabling_audience_prevents_startup`, `Replacing_the_events_prevents_startup`, `OnTokenValidated_delegate_approving_alone_does_not_skip_normalization` |
+| Configuração tardia (`PostConfigure`, troca de `Events`) desligando a validação ou pulando a normalização | `IValidateOptions` depois de toda configuração; normalização em métodos sobrescritos | `PostConfigure_disabling_audience_prevents_startup`, `Replacing_the_events_prevents_startup` |
+| Delegate de evento aprovando sem validar (`Success()` ou principal definido em `OnMessageReceived` ou `OnAuthenticationFailed`) ou trocando o token ou o principal validado em `OnTokenValidated` | Os métodos sobrescritos conferem o resultado do delegate e recusam (401, log 3201) | `OnTokenValidated_delegate_approving_alone_does_not_skip_normalization`, `EventGuardTests.OnMessageReceived_delegate_cannot_approve_before_the_token_is_validated`, `OnAuthenticationFailed_delegate_cannot_turn_a_rejected_token_into_success`, `OnTokenValidated_delegate_cannot_swap_the_validated_token` |
 | Token na query string vazando em logs | Aceito só em `HubPaths` | `Query_token_is_only_accepted_on_configured_hubs` |
 
 </details>
@@ -87,13 +87,15 @@ Os testes citados ficam em `TEC.Security.Tests` ([🧪 Testes](testes.md)).
 
 | Ameaça | Controle | Prova |
 |---|---|---|
-| **Injeção de permissão/tenant/tipo via claim** (`tec_perm`, `tec_tenant`, `tec_kind`) | Todo `tec_*` do provedor é descartado; só a marca criada pelo componente vale | `Injected_tec_perm_claim_does_not_grant_permission`, `Tec_claims_from_the_provider_are_discarded`, `Identity_without_normalization_mark_is_anonymous` |
-| Identidade por e-mail/login (mutável) | Id = `oid`/`sub`; nome só exibição | `User_token_of_registered_tenant_is_normalized` |
+| **Injeção de permissão/tenant/tipo via claim** (`tec_perm`, `tec_tenant`, `tec_kind`) | Todo `tec_*` do provedor é descartado; só a identidade criada pelo `SecurityIdentityFactory` vale | `Injected_tec_perm_claim_does_not_grant_permission`, `Tec_claims_from_the_provider_are_discarded`, `Identity_without_normalization_mark_is_anonymous` |
+| **Principal forjado** com todos os claims `tec_*` e a marca `tec_normalized` (delegate, outro esquema, middleware) | A normalização é provada pelo tipo interno criado pela fábrica, não pela marca; os claims `tec_*` da identidade ficam travados | `NormalizedIdentityTests.Principal_with_every_tec_claim_but_not_created_by_the_factory_is_anonymous`, `Identity_forged_by_another_middleware_gets_403_instead_of_access`, `Normalized_identity_tec_claims_are_locked_after_creation` |
+| Aplicação passando como pessoa (ou o contrário) em `Kinds` | `Kind` por regras do esquema; token sem sinal reconhecido é recusado; claims editáveis como `preferred_username` não decidem | `OpenIdConnectApiTests.Entra_application_token_without_idtyp_never_passes_as_user`, `OpenIdConnectIdentityTests.Editable_preferred_username_never_makes_a_user_an_application`, `Token_without_any_signal_is_rejected_by_default` |
+| Identidade por e-mail/login (mutável) | Id = `sub`; nome só exibição | `Valid_token_creates_normalized_user_with_catalog_tenant_and_permissions` |
 | Nome de exibição forjado (texto invertido por U+202E, quebra por U+2028) | Nome com controle bidirecional, separador de linha/parágrafo ou surrogate solto é recusado inteiro; corte respeita pares | `Display_name_with_bidi_override_or_line_separator_is_rejected`, `Display_name_truncation_never_splits_a_surrogate_pair` |
 | Id externo fora do ASCII resolvendo para outro tenant (`ſ` → `S`) | Ids externos só ASCII visível antes de montar a chave | `SecurityRegressionTests.TenantRegistry_ExternalIdOutsideAscii_NeverResolvesToAnotherTenant` |
-| Cadastro inválido liberando ou bloqueando por engano | Versão inválida recusada (anterior continua); inicial inválida impede a subida | `Invalid_reload_is_rejected_and_previous_catalog_remains`, `Same_external_id_in_two_tenants_prevents_startup` |
+| Cadastro inválido liberando ou bloqueando por engano | Recarga com erro vale por entrada (as válidas, inclusive desativações, entram em uso; as com erro falham fechadas); cadastro inicial inválido impede a subida | `Invalid_reload_fails_closed_for_ambiguous_external_id_and_logs`, `Invalid_reload_still_applies_deactivation_of_another_tenant`, `Same_external_id_in_two_tenants_prevents_startup` |
 | Falha da fonte de permissões autorizando | Exceção do store recusa a autenticação | `Permission_store_failure_rejects_the_identity` |
-| Admin de tenant cliente atribuindo app role privilegiado (multi-tenant) | Permissões por tenant; aviso 3403 | `Per_tenant_mapping_applies_only_to_that_tenant` |
+| Admin de tenant cliente atribuindo app role privilegiado (multi-tenant) | `RolesAsPermissions` em `false` por padrão com provedor multi-tenant, também depois da revalidação da sessão (claim `tec_multi_tenant`); permissões por tenant; aviso 3403 se for forçado a `true` | `Issue11_RolesAsPermissions_Defaults_To_False_In_MultiTenant`, `Per_tenant_mapping_applies_only_to_that_tenant`, `Revalidation_keeps_the_multi_tenant_default_of_RolesAsPermissions`, `MultiTenant_role_is_not_a_permission_by_default_but_per_tenant_mapping_applies` |
 | Endpoint esquecido sem autorização | `FallbackPolicy` exige identidade normalizada | `Endpoint_without_attribute_requires_authentication_and_returns_ApiResponse` |
 | `[AllowAnonymous]` anulando `[TecAuthorize]` | Aplicação não sobe | `TecAuthorize_with_AllowAnonymous_prevents_startup` |
 | Regra vazia degradando para "qualquer autenticado" | Aplicação não sobe | `TecAuthorize_with_empty_value_is_rejected_at_mapping` |
@@ -133,6 +135,10 @@ Os testes citados ficam em `TEC.Security.Tests` ([🧪 Testes](testes.md)).
 | Logout forçado por CSRF | Só `POST` e só da mesma origem | `Logout_from_another_site_is_rejected` |
 | Tenant desativado continua acessando | Tenant a cada requisição; tenant e permissões a cada intervalo; duração absoluta | `Revalidation_reflects_disabled_tenant` |
 | Cookies de nonce acumulados por chamadas de API | 401 antes do OIDC para chamadas sem `Accept: text/html` | `API_call_without_session_does_not_write_OIDC_cookies` |
+| Papéis de outros clients no ID token (`resource_access` do Keycloak, ex.: `realm-management`) | Só os papéis do próprio `ClientId`, comparação exata | `OpenIdConnectIdentityTests.Web_login_role_of_another_client_does_not_grant_permission` |
+| Delegate do OIDC aprovando sem o ID token ou trocando a identidade (`OnMessageReceived`, `OnAuthorizationCodeReceived`, `OnTokenResponseReceived`, `OnAuthenticationFailed`, `OnTokenValidated`, `OnTicketReceived`) | Login recusado (401, log 3207) | `EventGuardTests.OIDC_OnMessageReceived_delegate_cannot_create_a_session`, `OIDC_delegates_cannot_approve_before_normalization`, `OIDC_OnTicketReceived_delegate_cannot_swap_the_normalized_identity` |
+| Identidade forjada no cookie de sessão | Só a identidade normalizada de usuário é gravada (`SigningIn`); a leitura reconstrói a do próprio cookie antes de qualquer delegate | `EventGuardTests.Cookie_accepts_only_the_normalized_user_identity_at_sign_in`, `Cookie_round_trip_restores_the_normalized_identity`, `Cookie_delegate_replacing_the_principal_with_a_forged_one_ends_the_session` |
+| Segredo do cliente rotacionado ou revogado no cofre | Conferido na subida e lido de novo a cada login (troca do código e PAR) | `OpenIdConnectWebLoginTests.Vault_secret_is_read_on_each_code_redemption_and_follows_rotation`, `Vault_secret_is_sent_in_pushed_authorization_requests` |
 
 </details>
 
@@ -142,13 +148,12 @@ Os testes citados ficam em `TEC.Security.Tests` ([🧪 Testes](testes.md)).
 | Ameaça | Controle | Prova |
 |---|---|---|
 | **Exfiltração do token de serviço** (SSRF) | `AllowedHosts` exato + HTTPS + sem usuário na URL | `Token_is_attached_only_for_allowed_host_over_HTTPS`, `FuzzingTests.ServiceTokenDestination_OnlyHttpsToTheExactAllowedHost` |
-| Instância do Entra adulterada | Só instâncias oficiais, sem caminho/porta/query | `Unofficial_instance_prevents_startup` |
-| Chave privada da aplicação exposta | Client assertion PS256 assinada **no** cofre | `Client_assertion_is_signed_in_vault_with_PS256_and_x5t_S256` |
-| Credencial de desenvolvedor em servidor | `Developer` só em Development | `Developer_credential_outside_Development_is_rejected` |
+| Endpoint de token em HTTP ou corpo de erro do IdP vazando na exceção | HTTPS obrigatório (exceto loopback); a mensagem traz só o status HTTP, sem ler o corpo | `Issue13_M2M_Requires_Https_And_Sanitizes_Error`, `Non_success_status_fails_without_exposing_the_body` |
+| Redirecionamento do endpoint de token reenviando o `client_secret` (307/308) | O `HttpClient` do cliente M2M não segue redirecionamentos nem guarda cookies; 3xx é falha | `Token_endpoint_HttpClient_does_not_follow_redirects_nor_keep_cookies` |
+| Resposta gigante ou lenta do endpoint de token | Teto de 256 KB; o tempo limite vale até o fim do corpo | `Oversized_token_response_is_rejected_without_reading_it_all`, `Token_endpoint_that_stalls_in_the_body_is_cut_by_the_timeout` |
+| `expires_in` inválido mantendo um token no cache por tempo errado | Valor inválido falha fechado; ausente vale 60 s; acima de 24 h conta 24 h | `Invalid_expires_in_fails_closed`, `Expires_in_defines_a_conservative_lifetime` |
+| Cliente M2M inseguro descoberto só no primeiro token (e `PrivateKeyJwt` sem implementação) | `ValidateOnStart`: a aplicação não sobe; o construtor público lança `NotSupportedException` para `PrivateKeyJwt` | `Invalid_client_options_prevent_startup`, `Issue3_PrivateKeyJwt_Throws_NotSupportedException` |
 | Provedor de teste esquecido em produção | `AddTestJwt` impede a subida fora de Development/Testing/Test | `Test_provider_does_not_start_in_production` |
-| Erro do Entra com texto arbitrário no log | Só código OAuth validado | `Entra_error_code_is_filtered_before_logging` |
-| Resposta gigante ou validade absurda do endpoint de token | Leitura com teto de 64 KB; `expires_in` entre 1 s e 24 h, pelo `TimeProvider` | `Token_endpoint_response_without_length_is_read_with_a_ceiling`, `Token_endpoint_expiration_uses_the_injected_clock_and_rejects_absurd_values` |
-| Arquivo de token federado gigante | `BoundedFileReader` com 16 KB | `Federated_token_file_is_read_with_a_size_limit` |
 | Instabilidade do provedor derrubando chamadas | Token atual em uso enquanto valer mais de 30 s | `Refresh_failure_keeps_using_the_current_token_while_it_is_still_valid` |
 | Crescimento sem limite do cache de tokens | No máximo 1024 conjuntos de escopos | `Token_provider_limits_the_number_of_distinct_scope_sets` |
 
@@ -165,7 +170,8 @@ Os testes citados ficam em `TEC.Security.Tests` ([🧪 Testes](testes.md)).
 | Memória do cache esgotada | Chave de tamanho fixo; 50.000 entradas | `Permission_cache_key_has_fixed_size_even_with_many_roles`, `PermissionCache_DistinctIdentitiesBeyondLimit_FailsNothing` |
 | Token/segredo em log | Só o tipo da exceção; `ToString()` mascarado | `Failure_log_does_not_contain_the_token`, `LeakageTests` |
 | Motivo da recusa orientando o atacante | 401/403 genéricos e idênticos | `LeakageTests.RejectedTokens_AllReasons_IdenticalResponse_AndTokenNeverLogged` |
-| Injeção de linha no log | Valores validados antes do log | `LeakageTests.IdentityRejection_LogInjection_IsNotPossible` |
+| Injeção de linha no log | Valores validados antes do log; o claim de tenant recusado vira só tamanho e identificador | `LeakageTests.IdentityRejection_LogInjection_IsNotPossible`, `OpenIdConnectApiTests.MultiTenant_rejection_log_never_contains_the_tenant_claim_value` |
+| Ids de API key inventados em rajada custando CPU no log de recusa | Contagem à parte e varredura das janelas vencidas no máximo uma vez por intervalo | `Rejection_log_limiter_sweeps_expired_windows_at_most_once_per_interval`, `Rejection_log_limiter_memory_is_bounded_for_invented_ids` |
 
 </details>
 
@@ -176,12 +182,13 @@ por um `IHostedService` na subida: a violação impede a aplicação de subir.
 
 | Esquema | Controles |
 |---|---|
-| Bearer (JWT) | Emissor, audiência, validade e chave de assinatura validados; `exp`, assinatura e audiência exigidos; sem `SignatureValidator`, `LifetimeValidator` ou `AlgorithmValidator` personalizados; `ClockSkew` de 0 a 2 min; `MapInboundClaims` e `SaveToken` desligados; `RequireHttpsMetadata`; audiência e emissor informados; algoritmos só RS\*/PS\*/ES\*; `Events`/`EventsType` não substituídos |
-| Login web (OIDC) | `ResponseType = code`; PKCE; nonce e state; validação do ID token completa; sem validadores personalizados; algoritmos só RS\*/PS\*/ES\*; `SaveTokens` e `MapInboundClaims` desligados; sem `GetClaimsFromUserInfoEndpoint`; `ClientId` e `Authority`; eventos não substituídos |
+| Bearer (JWT) | Emissor, audiência, validade e chave de assinatura validados; `exp`, assinatura e audiência exigidos; sem `SignatureValidator`, `LifetimeValidator` ou `AlgorithmValidator` personalizados; `ClockSkew` de 0 a 2 min; `MapInboundClaims` e `SaveToken` desligados; `RequireHttpsMetadata` (ou `Authority` em loopback); audiência e emissor informados; algoritmos só RS\*/PS\*/ES\*; sem `IssuerValidator`, `AudienceValidator`, `IssuerSigningKeyResolver`, `IssuerSigningKeyValidator`, `TokenReader`, `TransformBeforeSignatureValidation`, `CryptoProviderFactory` nem chaves de decifração; `TokenHandlers` com um único `JsonWebTokenHandler`; `Events`/`EventsType` não substituídos. Os delegates dos eventos são conferidos a cada requisição (não aprovam sozinhos) |
+| Login web (OIDC) | `ResponseType = code`; PKCE; nonce e state; validação do ID token completa; sem validadores personalizados; algoritmos só RS\*/PS\*/ES\*; `SaveTokens` e `MapInboundClaims` desligados; sem `GetClaimsFromUserInfoEndpoint`; `ClientId` e `Authority`; eventos não substituídos; com `ClientSecretName`, o segredo existe no cofre |
+| Provedor OpenID Connect | Regras de `Kind` no formato `claim=valor`, sem claims editáveis nem `tec_*`; cliente M2M validado (`ValidateOnStart`) e registrado uma vez |
 | Cookie | HttpOnly, `Secure` sempre, SameSite Lax ou Strict; `ExpireTimeSpan` de até 12 h; `__Host-` com `Path=/` e sem `Domain`; eventos não substituídos |
 | Endpoints | `[TecAuthorize]` com valores válidos e sem `[AllowAnonymous]` |
 | Cadastros | Tenants e API keys válidos |
-| Ambiente | `Developer` só em Development; `AddTestJwt` só em Development/Testing/Test |
+| Ambiente | `AddTestJwt` só em Development/Testing/Test |
 
 ### Limites contra abuso de recursos
 
@@ -192,10 +199,8 @@ por um `IHostedService` na subida: a violação impede a aplicação de subir.
 | Papel, escopo, permissão | 128 caracteres; id de identidade 256; nome de exibição 256 |
 | Chave de API apresentada | 128 caracteres |
 | Cache de permissões | 50.000 entradas, chave de tamanho fixo |
-| Cache On-Behalf-Of | 10.000 entradas |
 | Conjuntos de escopos no provedor de token | 1.024 |
-| Resposta do endpoint de token | 64 KB; `expires_in` de 1 s a 24 h |
-| Token federado | 16 KB |
+| Resposta do endpoint de token | 256 KB; tempo limite (padrão 10 s, até 5 min) do envio ao fim do corpo; `expires_in` inválido falha, ausente vale 60 s e acima de 24 h conta 24 h |
 | Policies `TEC\|...` em cache | 10.000 |
 | `returnUrl` | 2.048 caracteres |
 
@@ -208,13 +213,14 @@ O TEC.Security **não** limita a taxa de requisições. Use o `RateLimiter` do A
 ### Checklist de produção
 
 - [ ] `RequireTenant: true` em sistemas multi-tenant e filtro por tenant no acesso a dados.
-- [ ] `AllowedClientApplications` preenchido nas APIs.
-- [ ] App registration com *Assignment required*, `requestedAccessTokenVersion: 2` e app roles.
-- [ ] Credencial `ManagedIdentityFederation`/`WorkloadIdentity` (ou `Certificate` no cofre, não exportável).
+- [ ] No Entra ID: app registration com *Assignment required*, `requestedAccessTokenVersion: 2` e app roles.
+- [ ] Segredo do cliente no TEC.Vault (`ClientSecretName`), nunca em `ClientSecret`.
+- [ ] Regras de `Kind` conferidas com um token real de usuário e um de aplicação do seu IdP (sem `Unresolved = User` ou
+      `Application` por conveniência); decisões de acesso por `Permissions`/`Roles`.
 - [ ] Data Protection persistido e protegido (login web com várias instâncias).
 - [ ] HTTPS obrigatório, HSTS e `UseForwardedHeaders` atrás de proxy.
 - [ ] Rate limiting nos endpoints públicos, de login e de API key.
-- [ ] Alertas nos eventos 3110, 3203, 3003, 3101, 3120, 3401 e na métrica `security.authentication.failures`.
+- [ ] Alertas nos eventos 3110, 3203, 3003, 3101, 3120 e na métrica `security.authentication.failures`.
 - [ ] Logs de acesso sem `Authorization`, `X-Api-Key` e `access_token`.
 - [ ] `RolesAsPermissions: false` e permissões por tenant em APIs multi-tenant (sem aviso 3403).
 - [ ] Nenhum `AddTestJwt` alcançável fora de Development, Testing e Test.
@@ -231,11 +237,10 @@ As opções que afetam segurança e os seus limites seguros:
 | `SecurityAspNetCoreOptions.HubPaths` | vazio | Liste só hubs reais; mascare `access_token` nos logs |
 | `SecurityAspNetCoreOptions.MaxTokenLength` | 16.384 | Aumente só se o IdP emitir tokens maiores |
 | `SecurityOptions.RolesAsPermissions` | não definido: `true`; `false` com provedor multi-tenant | Mantenha `false` em multi-tenant |
-| `EntraIdApiOptions.AllowedClientApplications` | vazio | Preencha |
-| `EntraIdWebLoginOptions.MaxSessionLifetime` / `RevalidationInterval` | 8 h / 5 min | Reduza em sistemas críticos |
+| `OpenIdConnectApiOptions.Kind.Unresolved` | `Reject` | `User` ou `Application` só quando toda aplicação (ou todo usuário) do IdP é reconhecida por uma regra |
+| `WebLoginDefinition.MaxSessionLifetime` / `RevalidationInterval` | 8 h / 5 min | Reduza em sistemas críticos |
 | `UsePermissionStore` (cache) | 5 min | Menor = revogação mais rápida |
 | `AccessTokenHandlerOptions.AllowHttpForLoopback` | `false` | Só em desenvolvimento |
-| `EntraIdCredentialOptions.AllowDeveloperCredentialsOutsideDevelopment` | `false` | Só CI e ferramentas |
 
 ---
 
@@ -253,6 +258,9 @@ Riscos residuais (o que o componente não resolve sozinho):
 | Tokens v1 na nuvem US Gov | Emissor v1 não mapeado | Use tokens v2 |
 | CSRF em APIs autenticadas por cookie | `SameSite=Lax` cobre a maioria dos navegadores | Antiforgery do ASP.NET Core |
 | Data Protection sem persistência | Sessões invalidadas a cada deploy | Persistir as chaves (Blob + Key Vault) |
+| ID token aceito como access token | O provedor OpenID Connect não confere o tipo do token (`typ`, `azp`, `nonce`) | Audiência exclusiva da API, diferente do client id do site |
+| Regras de `Kind` frouxas ou desalinhadas com o IdP | Os claims que marcam aplicação variam por IdP e versão; o token sem sinal é recusado, mas `Unresolved = User`/`Application` ou uma regra ampla voltam a aceitar | Conferir um token real de cada tipo; manter `Reject` |
+| Delegate de evento que muda claims do principal do OIDC sem trocá-lo | Os guardas barram aprovação antecipada e troca do token ou do principal; um `OnTokenValidated` do login web que só acrescente claims ao principal recebido muda o que vira identidade | Não registrar delegates que mexam em claims; revisar `PostConfigure` de bibliotecas de terceiros |
 
 ---
 
@@ -263,8 +271,8 @@ Riscos residuais (o que o componente não resolve sozinho):
 > passos para reproduzir.
 
 Cadeia de suprimentos do próprio componente: `NuGetAudit` (inclusive transitivos) como erro, lock files com restore
-`--locked-mode`, `packageSourceMapping` (TEC.\* só do feed interno), analisadores de segurança como erro e Actions fixadas
-por SHA ([⚙️ CI/CD](../.github/workflows/README.md)).
+`--locked-mode`, `packageSourceMapping` (TEC.\* só do feed interno), analisadores de segurança como erro e Actions de terceiros
+fixadas por SHA; os workflows reutilizáveis do `tec-workflows` são chamados pela tag `@v1` ([⚙️ CI/CD](../.github/workflows/README.md)).
 
 ---
 

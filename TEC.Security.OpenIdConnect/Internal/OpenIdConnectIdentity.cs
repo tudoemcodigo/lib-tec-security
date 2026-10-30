@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using System.Text.Json;
 using TEC.Core.Security;
+using TEC.Core.Text.Masking;
 using TEC.Security.Abstractions;
 using TEC.Security.Claims;
+using TEC.Security.Common;
 
 namespace TEC.Security.OpenIdConnect.Internal;
 
@@ -11,8 +13,30 @@ internal static class OpenIdConnectIdentity
 {
     public const string ProviderName = "OpenIdConnect";
 
+    /// <summary>Access token de uma API: o tipo (<c>Kind</c>) vem das regras do esquema (<see cref="OpenIdConnectApiOptions.Kind"/>).</summary>
     public static ExternalIdentity? FromClaims(string scheme, IReadOnlyList<Claim> claims, OpenIdConnectApiOptions options,
+        ITenantRegistry? tenantRegistry, out string rejectionReason) =>
+        Create(scheme, claims, options, KindClassifier.Create(options, scheme), tenantRegistry, out rejectionReason);
+
+    /// <summary>Access token de uma API, com as regras de <c>Kind</c> já conferidas no registro do esquema.</summary>
+    public static ExternalIdentity? FromClaims(string scheme, IReadOnlyList<Claim> claims, OpenIdConnectApiOptions options,
+        KindClassifier classifier, ITenantRegistry? tenantRegistry, out string rejectionReason) =>
+        Create(scheme, claims, options, classifier, tenantRegistry, out rejectionReason);
+
+    /// <summary>
+    /// ID token do login web: sempre <c>User</c> (um login interativo é de uma pessoa) e, em <c>resource_access</c>, só os papéis
+    /// do próprio <see cref="OpenIdConnectWebLoginOptions.ClientId"/>.
+    /// </summary>
+    public static ExternalIdentity? FromWebLogin(string scheme, IReadOnlyList<Claim> claims, OpenIdConnectWebLoginOptions options,
         ITenantRegistry? tenantRegistry, out string rejectionReason)
+    {
+        var apiOptions = new OpenIdConnectApiOptions { Authority = options.Authority, Audience = options.ClientId };
+        return Create(scheme, claims, apiOptions, classifier: null, tenantRegistry, out rejectionReason);
+    }
+
+    /// <summary>Converte os claims; <paramref name="classifier"/> nulo fixa <c>Kind = User</c> (login web).</summary>
+    private static ExternalIdentity? Create(string scheme, IReadOnlyList<Claim> claims, OpenIdConnectApiOptions options,
+        KindClassifier? classifier, ITenantRegistry? tenantRegistry, out string rejectionReason)
     {
         rejectionReason = string.Empty;
         string? subject = null;
@@ -105,6 +129,20 @@ internal static class OpenIdConnectIdentity
             return null;
         }
 
+        PrincipalKind kind;
+        if (classifier is null)
+        {
+            kind = PrincipalKind.User;
+        }
+        else if (classifier.Classify(claims, subject, out rejectionReason) is { } classified)
+        {
+            kind = classified;
+        }
+        else
+        {
+            return null;
+        }
+
         string? resolvedTenant = null;
         string? tenantLookupKey = externalTenant ?? issuer;
 
@@ -116,55 +154,32 @@ internal static class OpenIdConnectIdentity
                 return null;
             }
 
-            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey ?? string.Empty);
+            // O valor vem do token: no motivo (que vai para o log) só o tamanho e um identificador, nunca o texto
+            if (!SecurityRules.IsValidUserId(tenantLookupKey))
+            {
+                rejectionReason = "tenant do token ausente ou fora do formato (" + SensitiveDataMasker.DescribeUntrusted(tenantLookupKey) + ")";
+                return null;
+            }
+
+            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey!);
             if (tenantInfo is null || !tenantInfo.Enabled)
             {
-                rejectionReason = $"tenant '{tenantLookupKey}' não encontrado ou inativo no cadastro de tenants";
+                rejectionReason = "tenant do token não cadastrado ou inativo (" + SensitiveDataMasker.DescribeUntrusted(tenantLookupKey) + ")";
                 return null;
             }
 
             resolvedTenant = tenantInfo.Id;
             externalTenant ??= tenantLookupKey;
         }
-        else if (tenantRegistry is not null && tenantLookupKey is not null)
+        else if (tenantRegistry is not null && SecurityRules.IsValidUserId(tenantLookupKey))
         {
-            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey);
+            var tenantInfo = tenantRegistry.FindByExternalId(ProviderName, tenantLookupKey!);
             if (tenantInfo is { Enabled: true })
             {
                 resolvedTenant = tenantInfo.Id;
                 externalTenant ??= tenantLookupKey;
             }
         }
-
-        bool isApplication = false;
-        string? gty = claims.FirstOrDefault(c => c.Type == "gty")?.Value;
-        string? idtyp = claims.FirstOrDefault(c => c.Type == "idtyp")?.Value;
-        string? azp = claims.FirstOrDefault(c => c.Type == "azp")?.Value;
-        string? clientIdClaim = claims.FirstOrDefault(c => c.Type is "client_id" or "clientId")?.Value;
-        string? prefUser = claims.FirstOrDefault(c => c.Type == "preferred_username")?.Value;
-
-        if (string.Equals(gty, "client-credentials", StringComparison.OrdinalIgnoreCase))
-        {
-            isApplication = true;
-        }
-        else if (string.Equals(idtyp, "app", StringComparison.OrdinalIgnoreCase))
-        {
-            isApplication = true;
-        }
-        else if (prefUser is not null && prefUser.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase))
-        {
-            isApplication = true;
-        }
-        else if (subject is not null && (
-            (azp is not null && string.Equals(subject, azp, StringComparison.OrdinalIgnoreCase)) ||
-            (clientIdClaim is not null && string.Equals(subject, clientIdClaim, StringComparison.OrdinalIgnoreCase))))
-        {
-            bool hasUserSignal = claims.Any(c => c.Type is "email" or "upn" or "sid" or "auth_time");
-            if (!hasUserSignal)
-                isApplication = true;
-        }
-
-        var kind = isApplication ? PrincipalKind.Application : PrincipalKind.User;
 
         return new ExternalIdentity
         {
@@ -232,30 +247,37 @@ internal static class OpenIdConnectIdentity
         }
     }
 
+    /// <summary>
+    /// Papéis de <c>resource_access</c> (Keycloak) só dos clients alvo (audiências da API ou client id do login web), com
+    /// comparação exata. Sem client alvo, nenhum: importar os papéis de todos os clients daria a esta aplicação papéis de outras
+    /// (ex.: <c>realm-management</c>).
+    /// </summary>
     private static void ExtractResourceAccessRoles(string json, string? primaryAudience, IReadOnlyCollection<string>? allowedAudiences, HashSet<string> target)
     {
+        var targetClients = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(primaryAudience))
+            targetClients.Add(primaryAudience);
+        if (allowedAudiences is not null)
+        {
+            foreach (var aud in allowedAudiences)
+            {
+                if (!string.IsNullOrWhiteSpace(aud))
+                    targetClients.Add(aud);
+            }
+        }
+
+        if (targetClients.Count == 0)
+            return;
+
         try
         {
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
                 return;
 
-            var targetClients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(primaryAudience))
-                targetClients.Add(primaryAudience);
-            if (allowedAudiences is not null)
-            {
-                foreach (var aud in allowedAudiences)
-                {
-                    if (!string.IsNullOrWhiteSpace(aud))
-                        targetClients.Add(aud);
-                }
-            }
-
             foreach (var clientProp in doc.RootElement.EnumerateObject())
             {
-                // Isola os papéis estritamente aos clientes autorizados desta API
-                if (targetClients.Count > 0 && !targetClients.Contains(clientProp.Name))
+                if (!targetClients.Contains(clientProp.Name))
                     continue;
 
                 if (clientProp.Value.ValueKind == JsonValueKind.Object &&
@@ -274,5 +296,170 @@ internal static class OpenIdConnectIdentity
         {
             // Ignora JSON malformado
         }
+    }
+}
+
+/// <summary>
+/// Regras de <see cref="OpenIdConnectKindOptions"/> já conferidas e compiladas (uma instância por esquema, criada no registro).
+/// </summary>
+internal sealed class KindClassifier
+{
+    // Claims que o usuário ou o administrador do tenant editam: não decidem o tipo da identidade
+    private static readonly HashSet<string> MutableClaims = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "preferred_username", "name", "given_name", "family_name", "middle_name", "nickname", "email", "upn", "unique_name"
+    };
+
+    private static readonly string[] ClientClaims = ["azp", "client_id", "clientId", "cid", "appid"];
+
+    private readonly ClaimRule[] _application;
+    private readonly ClaimRule[] _user;
+    private readonly bool _subjectIsClient;
+    private readonly bool _entraIdScp;
+    private readonly OpenIdConnectUnresolvedKind _unresolved;
+
+    private KindClassifier(ClaimRule[] application, ClaimRule[] user, bool subjectIsClient, bool entraIdScp, OpenIdConnectUnresolvedKind unresolved)
+    {
+        _application = application;
+        _user = user;
+        _subjectIsClient = subjectIsClient;
+        _entraIdScp = entraIdScp;
+        _unresolved = unresolved;
+    }
+
+    /// <summary>Confere e compila as regras do esquema.</summary>
+    /// <exception cref="InvalidOperationException">Regra fora do formato, sobre claim editável ou reservado, ou valor inválido.</exception>
+    public static KindClassifier Create(OpenIdConnectApiOptions options, string scheme)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var kind = options.Kind;
+        if (!Enum.IsDefined(kind.Unresolved))
+            throw new InvalidOperationException($"OpenID Connect '{scheme}': Kind.Unresolved inválido.");
+
+        return new KindClassifier(
+            Parse(kind.ApplicationClaims, scheme, nameof(kind.ApplicationClaims)),
+            Parse(kind.UserClaims, scheme, nameof(kind.UserClaims)),
+            kind.ApplicationWhenSubjectIsClient,
+            kind.UseEntraIdScpRule ?? IsEntraIdAuthority(options.Authority),
+            kind.Unresolved);
+    }
+
+    /// <summary>O tipo da identidade, ou <c>null</c> (recusa) com o motivo, sem valores do token.</summary>
+    public PrincipalKind? Classify(IReadOnlyList<Claim> claims, string subject, out string reason)
+    {
+        bool application = MatchesAny(claims, _application) || (_subjectIsClient && SubjectIsClient(claims, subject));
+        bool user = MatchesAny(claims, _user);
+
+        if (_entraIdScp)
+        {
+            if (HasDelegatedScope(claims))
+                user = true;
+            else
+                application = true;
+        }
+
+        reason = string.Empty;
+        if (application && user)
+        {
+            reason = "tipo da identidade ambíguo: o token tem sinais de usuário e de aplicação (ajuste Kind no esquema)";
+            return null;
+        }
+
+        if (application)
+            return PrincipalKind.Application;
+        if (user)
+            return PrincipalKind.User;
+
+        switch (_unresolved)
+        {
+            case OpenIdConnectUnresolvedKind.User:
+                return PrincipalKind.User;
+            case OpenIdConnectUnresolvedKind.Application:
+                return PrincipalKind.Application;
+            default:
+                reason = "tipo da identidade indeterminado: nenhuma regra de usuário ou de aplicação reconheceu o token (ajuste Kind no esquema)";
+                return null;
+        }
+    }
+
+    /// <summary>Authority do Microsoft Entra ID (nuvens pública, governamental dos EUA, China e External ID).</summary>
+    internal static bool IsEntraIdAuthority(string? authority) =>
+        Uri.TryCreate(authority, UriKind.Absolute, out var uri)
+        && (uri.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("login.microsoftonline.us", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("login.partner.microsoftonline.cn", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("login.chinacloudapi.cn", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".ciamlogin.com", StringComparison.OrdinalIgnoreCase));
+
+    private static bool MatchesAny(IReadOnlyList<Claim> claims, ClaimRule[] rules)
+    {
+        foreach (var rule in rules)
+        {
+            foreach (var claim in claims)
+            {
+                if (rule.Matches(claim))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SubjectIsClient(IReadOnlyList<Claim> claims, string subject)
+    {
+        foreach (var claim in claims)
+        {
+            if (Array.IndexOf(ClientClaims, claim.Type) >= 0 && string.Equals(claim.Value, subject, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    // Token de agente autônomo do Entra ID traz scp vazio ou "/" (sem escopo delegado)
+    private static bool HasDelegatedScope(IReadOnlyList<Claim> claims)
+    {
+        foreach (var claim in claims)
+        {
+            if (claim.Type == "scp" && claim.Value.Trim() is { Length: > 0 } value && value != "/")
+                return true;
+        }
+
+        return false;
+    }
+
+    private static ClaimRule[] Parse(List<string>? rules, string scheme, string property)
+    {
+        if (rules is null)
+            return [];
+
+        var parsed = new List<ClaimRule>(rules.Count);
+        foreach (string? rule in rules)
+        {
+            int separator = rule?.IndexOf('=', StringComparison.Ordinal) ?? -1;
+            string claimType = separator > 0 ? rule![..separator] : string.Empty;
+            string value = separator > 0 ? rule![(separator + 1)..] : string.Empty;
+
+            if (claimType.Length == 0 || value.Length == 0 || claimType.Any(char.IsWhiteSpace) || value.Any(char.IsControl))
+                throw new InvalidOperationException($"OpenID Connect '{scheme}': Kind.{property} tem regra fora do formato 'claim=valor'.");
+            if (TecClaimTypes.IsReserved(claimType) || MutableClaims.Contains(claimType))
+                throw new InvalidOperationException(
+                    $"OpenID Connect '{scheme}': Kind.{property} não aceita o claim '{claimType}' (editável pelo usuário ou reservado do TEC.Security).");
+
+            bool any = value == "*";
+            bool prefix = !any && value.EndsWith('*');
+            parsed.Add(new ClaimRule(claimType, prefix ? value[..^1] : value, prefix, any));
+        }
+
+        return [.. parsed];
+    }
+
+    private readonly record struct ClaimRule(string ClaimType, string Value, bool Prefix, bool Any)
+    {
+        public bool Matches(Claim claim) =>
+            string.Equals(claim.Type, ClaimType, StringComparison.Ordinal)
+            && (Any || (Prefix
+                ? claim.Value.StartsWith(Value, StringComparison.Ordinal)
+                : string.Equals(claim.Value, Value, StringComparison.Ordinal)));
     }
 }

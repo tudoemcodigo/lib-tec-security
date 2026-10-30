@@ -20,7 +20,7 @@ identidade), identidade de sistema e `RunAs` para workers (`ISecurityContext`), 
 
 ## 🎯 Quando usar
 
-- Vem junto com `TEC.Security.AspNetCore` e `TEC.Security.EntraId`: normalmente você instala o provedor.
+- Vem junto com `TEC.Security.AspNetCore` e `TEC.Security.OpenIdConnect`: normalmente você instala o provedor.
 - Sozinho em **workers, jobs e consumidores de fila** que precisam de identidade (sistema ou usuário da mensagem), tenants
   e permissões, sem ASP.NET Core.
 - Para escrever uma biblioteca que recebe `ISecurityUser` ou um provedor de identidade novo.
@@ -29,7 +29,7 @@ identidade), identidade de sistema e `RunAs` para workers (`ISecurityContext`), 
 
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/tudoemcodigo/index.json -n tec-interno -u <usuario> -p <PAT>
-dotnet add package TEC.Security --version 0.2.0
+dotnet add package TEC.Security --version 0.0.1
 ```
 
 O feed do GitHub Packages exige um PAT *classic* com `read:packages`. O pacote traz o `TEC.Core` junto.
@@ -71,4 +71,4 @@ public sealed class FechamentoJob(ISecurityContext seguranca, IServiceScopeFacto
 [Erros](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/erros.md) ·
 [Segurança](https://github.com/tudoemcodigo/lib-tec-security/blob/main/docs/seguranca.md)
 
-`net8.0` e `net10.0` · Native AOT · [MIT](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código
+`net10.0` · Native AOT · [Apache 2.0](https://github.com/tudoemcodigo/lib-tec-security/blob/main/LICENSE) · Roberto Oliveira, equipe Tudo em Código

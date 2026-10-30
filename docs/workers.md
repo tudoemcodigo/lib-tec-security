@@ -158,7 +158,9 @@ Origem do principal lido por `ISecurityUser`, nesta ordem: `RunAs` → `HttpCont
 > `PrincipalKind.System` só existe dentro do processo: provedores só criam `User` ou `Application`, e claims `tec_*` vindos
 > de tokens são descartados. Mesmo assim, dê à identidade de sistema só os papéis de que o job precisa.
 
-- `RunAs` recusa principais "montados à mão" (sem a marca de normalização).
+- `RunAs` recusa principais "montados à mão", mesmo com todos os claims `tec_*`: só vale a identidade criada pelo
+  `SecurityIdentityFactory` (ou o `HttpContext.User` que ele produziu). Um principal serializado e lido de volta (por exemplo,
+  numa mensagem de fila) também é recusado; transporte id e tenant e crie a identidade de novo.
 - Nunca coloque tokens em mensagens de fila: transporte id e tenant.
 - Use nomes de serviço distintos por job (`fechamento-mensal`, `consumidor-pedidos`): a auditoria (`CreatedBy`) mostra
   quem fez.
