@@ -224,7 +224,7 @@ flowchart LR
 | [🤖 Workers](docs/workers.md) | Identidade de sistema, `RunAs`, filas e TEC.Cqrs fora do HTTP |
 | [🧱 Novo provedor](docs/novo-provedor.md) | Como plugar outro IdP com as mesmas garantias |
 | [🧬 Integrações TEC](docs/integracoes-tec.md) | Core, Vault, Cqrs, ORM e Observability |
-| [📈 Observabilidade](docs/observabilidade.md) | Métricas, traces, eventos de log e alertas |
+| [📈 Observabilidade](docs/observabilidade.md) | Métricas (`tec.security.*`; nomes `security.*` obsoletos até a 0.1.0), traces, eventos de log (3000-3999) e alertas |
 | [❌ Erros](docs/erros.md) | Códigos de `SecurityErrors`, respostas e exceções |
 | [🛡️ Segurança](docs/seguranca.md) | Modelo de ameaças, controles com os testes, limites, riscos residuais e checklist |
 | [🧪 Testes](docs/testes.md) | Testar a sua API; categorias, carga, benchmarks, variáveis `TEC_CARGA_*` |

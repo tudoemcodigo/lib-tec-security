@@ -2,6 +2,18 @@
 
 Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o projeto usa [Versionamento Semântico](https://semver.org/lang/pt-BR/). Os quatro pacotes saem sempre com a mesma versão.
 
+## [Não lançado]
+
+### 🔄 Alterado
+
+- **Métricas renomeadas para `tec.security.*` (CMP-OBS-06):** `tec.security.authentication.failures`, `tec.security.authorization.denied`, `tec.security.token.acquisition.duration` e `tec.security.circuit.state_changes`. O `Meter` e o `ActivitySource` continuam `TEC.Security` e as dimensões (`security.scheme`, `security.reason`, `security.provider`, `security.cache`, `security.circuit.state`, `error.type`) não mudam.
+- **Coexistência por uma versão MINOR:** os nomes antigos (`security.authentication.failures`, `security.authorization.denied`, `security.token.acquisition.duration`, `security.circuit.state_changes`) continuam sendo emitidos, com a mesma medição e as mesmas dimensões, e estão **obsoletos**. **Remoção prevista na 0.1.0 (2027-03-01).** Migre dashboards e alertas antes disso; uma consulta que soma os dois nomes conta cada evento em dobro.
+- **`SecurityDiagnostics`:** novas constantes `TecAuthenticationFailuresName`, `TecAuthorizationDeniedName`, `TecTokenAcquisitionDurationName` e `TecCircuitStateChangesName`. As constantes antigas (`AuthenticationFailuresName` e as demais) mantêm o valor antigo e estão obsoletas (documentação; sem `[Obsolete]`, para não gerar aviso de compilação).
+
+### 🛠️ Manutenção
+
+- Todos os `EventId` do componente (núcleo, ASP.NET Core e OpenID Connect) estão na faixa 3000-3999 (CMP-OBS-07); nenhum mudou. Testes travam a convenção dos nomes de instrumento, a coexistência (mesma medição e mesmas dimensões nos dois nomes) e a faixa e a unicidade dos ids.
+
 ## [0.0.1] - 2026-10-30
 
 Versão inaugural oficial da suíte de segurança e autorização do ecossistema TEC. Os pacotes trazem só `lib/net10.0`, sem versões condicionais por TFM nem polyfills.
@@ -42,4 +54,5 @@ Versão inaugural oficial da suíte de segurança e autorização do ecossistema
 - `LeakageTests` estável: a chave alterada não sai mais em Base64Url não canônico.
 - XML docs alinhadas ao comportamento real: `OpenIdConnectClientOptions.TokenEndpoint`, `ValidIssuers`, `MultiTenant`, os remarks de `ITenantRegistry`, `OpenIdConnectM2MAuthType.PrivateKeyJwt`, sem referências a pacotes e métodos que não existem (`TEC.Security.EntraId`, `AddEntraId*`).
 
+[Não lançado]: https://github.com/tudoemcodigo/lib-tec-security/compare/v0.0.1...HEAD
 [0.0.1]: https://github.com/tudoemcodigo/lib-tec-security/releases/tag/v0.0.1
