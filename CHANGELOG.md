@@ -6,13 +6,20 @@ Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O forma
 
 ### 🔄 Alterado
 
-- **Métricas renomeadas para `tec.security.*` (CMP-OBS-06):** `tec.security.authentication.failures`, `tec.security.authorization.denied`, `tec.security.token.acquisition.duration` e `tec.security.circuit.state_changes`. O `Meter` e o `ActivitySource` continuam `TEC.Security` e as dimensões (`security.scheme`, `security.reason`, `security.provider`, `security.cache`, `security.circuit.state`, `error.type`) não mudam.
-- **Coexistência por uma versão MINOR:** os nomes antigos (`security.authentication.failures`, `security.authorization.denied`, `security.token.acquisition.duration`, `security.circuit.state_changes`) continuam sendo emitidos, com a mesma medição e as mesmas dimensões, e estão **obsoletos**. **Remoção prevista na 0.1.0 (2027-03-01).** Migre dashboards e alertas antes disso; uma consulta que soma os dois nomes conta cada evento em dobro.
-- **`SecurityDiagnostics`:** novas constantes `TecAuthenticationFailuresName`, `TecAuthorizationDeniedName`, `TecTokenAcquisitionDurationName` e `TecCircuitStateChangesName`. As constantes antigas (`AuthenticationFailuresName` e as demais) mantêm o valor antigo e estão obsoletas (documentação; sem `[Obsolete]`, para não gerar aviso de compilação).
+- **Métricas renomeadas para `tec.security.*` (CMP-OBS-06), sem coexistência:** os nomes antigos foram **renomeados sem coexistência** (ADR 0009 da Doutrina: nenhum consumidor em produção). Só os nomes novos são emitidos; migre dashboards e alertas. O `Meter` e o `ActivitySource` continuam `TEC.Security` e as dimensões (`security.scheme`, `security.reason`, `security.provider`, `security.cache`, `security.circuit.state`, `error.type`) não mudam.
+
+  | Nome antigo | Nome novo |
+  |---|---|
+  | `security.authentication.failures` | `tec.security.authentication.failures` |
+  | `security.authorization.denied` | `tec.security.authorization.denied` |
+  | `security.token.acquisition.duration` | `tec.security.token.acquisition.duration` |
+  | `security.circuit.state_changes` | `tec.security.circuit.state_changes` |
+
+- **`SecurityDiagnostics`:** as constantes públicas passam a ser `TecAuthenticationFailuresName`, `TecAuthorizationDeniedName`, `TecTokenAcquisitionDurationName` e `TecCircuitStateChangesName`. As constantes `AuthenticationFailuresName`, `AuthorizationDeniedName`, `TokenAcquisitionDurationName` e `CircuitStateChangesName` (valor `security.*`) foram **removidas**.
 
 ### 🛠️ Manutenção
 
-- Todos os `EventId` do componente (núcleo, ASP.NET Core e OpenID Connect) estão na faixa 3000-3999 (CMP-OBS-07); nenhum mudou. Testes travam a convenção dos nomes de instrumento, a coexistência (mesma medição e mesmas dimensões nos dois nomes) e a faixa e a unicidade dos ids.
+- Todos os `EventId` do componente (núcleo, ASP.NET Core e OpenID Connect) estão na faixa 3000-3999 (CMP-OBS-07); nenhum mudou. Testes travam a convenção dos nomes de instrumento (todos `tec.security.*`), a inexistência dos nomes antigos e a faixa e a unicidade dos ids.
 
 ## [0.0.1] - 2026-10-30
 
