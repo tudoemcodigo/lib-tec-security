@@ -25,7 +25,7 @@ namespace TEC.Security.ApiKeys;
 /// Sem como ler a versão nova sem validação (validador criado fora do <c>AddTecSecurity</c>), todas as chaves ficam recusadas
 /// até a configuração ser corrigida.</para>
 /// <para>Recusas iguais (mesmo id e motivo) geram no máximo um log 3110 por <see cref="RejectionLogInterval"/>, com a
-/// contagem das omitidas; a métrica <c>security.authentication.failures</c> conta todas.</para>
+/// contagem das omitidas; a métrica <c>tec.security.authentication.failures</c> conta todas.</para>
 /// <para>O hash é sempre calculado e comparado em tempo constante, inclusive para id desconhecido: o tempo de resposta não
 /// revela quais ids existem.</para>
 /// </remarks>

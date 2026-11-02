@@ -86,7 +86,7 @@ sequenceDiagram
 ```
 
 - **Falha fechada, sem exceção:** identidade incompleta, tenant desconhecido/inativo, excesso de itens ou falha do store
-  viram `Result` de falha, log 3001/3003 e métrica `security.authentication.failures`; o esquema responde 401.
+  viram `Result` de falha, log 3001/3003 e métrica `tec.security.authentication.failures`; o esquema responde 401.
 - **Valores fora do formato** são descartados um a um (log 3002 com a quantidade, nunca o valor).
 - **Escopos** só existem em identidades `User`.
 - **Nome de exibição** com caractere de controle, separador de linha/parágrafo (U+2028/U+2029), controle bidirecional

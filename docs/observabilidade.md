@@ -38,7 +38,7 @@ flowchart LR
 | ActivitySource | `TEC.Security` | Um span por obtenção de token de serviço sem cache |
 | Logs | Categorias das classes (`SecurityIdentityFactory`, `ApiKeyValidator`...) e `TEC.Security.AspNetCore.*` | Mensagens por *source generator*, sem alocação com o nível desligado |
 
-Faixas de eventos: núcleo 3000–3199 e ASP.NET Core 3200–3399.
+Faixas de eventos: núcleo 3000–3199 e ASP.NET Core 3200–3399, dentro da faixa 3000–3999 do TEC.Security na tabela única de EventId (CMP-OBS-07); um teste trava a faixa e a unicidade dos ids nos três assemblies.
 
 ---
 
@@ -58,12 +58,29 @@ builder.Services.AddOpenTelemetry()
 
 ### Métricas
 
+Os instrumentos seguem a convenção `tec.<componente>.<nome>` (CMP-OBS-06). O nome do `Meter` continua `TEC.Security` e as
+dimensões (tags) continuam com os nomes `security.*` e `error.type`.
+
 | Instrumento | Tipo | Unidade | Dimensões |
 |---|---|---|---|
-| `security.authentication.failures` | Contador | `{failure}` | `security.scheme`, `security.reason` |
-| `security.authorization.denied` | Contador | `{denial}` | `security.scheme` (`none` sem esquema), `security.reason` |
-| `security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
-| `security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.circuit.state` (`open`, `half_open`, `closed`) |
+| `tec.security.authentication.failures` | Contador | `{failure}` | `security.scheme`, `security.reason` |
+| `tec.security.authorization.denied` | Contador | `{denial}` | `security.scheme` (`none` sem esquema), `security.reason` |
+| `tec.security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
+| `tec.security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.circuit.state` (`open`, `half_open`, `closed`) |
+
+#### Migração dos nomes antigos (obsoletos)
+
+Até a 0.1.0 (remoção prevista para 2027-03-01) o componente emite **também** os nomes antigos, com a mesma medição, a mesma
+unidade e as mesmas dimensões. Eles estão **obsoletos**: migre dashboards e alertas para os nomes novos antes da remoção. Quem
+usa o Prometheus deve trocar, por exemplo, `security_authentication_failures_total` por `tec_security_authentication_failures_total`.
+Durante a coexistência, uma consulta que soma os dois nomes conta cada evento em dobro.
+
+| Nome antigo (obsoleto) | Nome novo |
+|---|---|
+| `security.authentication.failures` | `tec.security.authentication.failures` |
+| `security.authorization.denied` | `tec.security.authorization.denied` |
+| `security.token.acquisition.duration` | `tec.security.token.acquisition.duration` |
+| `security.circuit.state_changes` | `tec.security.circuit.state_changes` |
 
 | `security.reason` (autenticação) | Origem |
 |---|---|
@@ -117,7 +134,7 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 
 ### Alertas sugeridos
 
-- Pico de 3201/3202 e de `security.authentication.failures` (varredura de tokens).
+- Pico de 3201/3202 e de `tec.security.authentication.failures` (varredura de tokens).
 - 3110 repetido para o mesmo id (chave vazada ou integração quebrada); 3110 com `chave expirada` (rotação esquecida).
 - 3203 repetido para o mesmo id (tentativa de escalonamento).
 - 3123 (circuito aberto: o provedor de identidade está falhando para todos os usuários).
@@ -132,10 +149,14 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | Membro | Valor / uso |
 |---|---|
 | `ActivitySourceName` / `MeterName` | `"TEC.Security"` |
-| `AuthenticationFailuresName` | `"security.authentication.failures"` |
-| `AuthorizationDeniedName` | `"security.authorization.denied"` |
-| `TokenAcquisitionDurationName` | `"security.token.acquisition.duration"` |
-| `CircuitStateChangesName` | `"security.circuit.state_changes"` |
+| `TecAuthenticationFailuresName` | `"tec.security.authentication.failures"` |
+| `TecAuthorizationDeniedName` | `"tec.security.authorization.denied"` |
+| `TecTokenAcquisitionDurationName` | `"tec.security.token.acquisition.duration"` |
+| `TecCircuitStateChangesName` | `"tec.security.circuit.state_changes"` |
+| `AuthenticationFailuresName` (obsoleto) | `"security.authentication.failures"`, remoção na 0.1.0 |
+| `AuthorizationDeniedName` (obsoleto) | `"security.authorization.denied"`, remoção na 0.1.0 |
+| `TokenAcquisitionDurationName` (obsoleto) | `"security.token.acquisition.duration"`, remoção na 0.1.0 |
+| `CircuitStateChangesName` (obsoleto) | `"security.circuit.state_changes"`, remoção na 0.1.0 |
 | `RecordAuthenticationFailure(scheme, reason)` | Para pacotes de provedor |
 | `RecordAuthorizationDenied(scheme, reason)` | Para pacotes de provedor |
 | `RecordTokenAcquisition(provider, cacheHit, seconds, errorType)` | Para provedores de token próprios |

@@ -20,7 +20,7 @@ namespace TEC.Security.Claims;
 /// <remarks>
 /// <para>Falha fechada, sem exceção: identidade incompleta, tenant desconhecido/inativo (com <see cref="SecurityOptions.RequireTenant"/>
 /// ou tenant explícito), excesso de papéis/permissões (token inflado) ou falha do <see cref="IPermissionStore"/> resultam em
-/// erro, registrado no log com o motivo (evento 3001) e na métrica <c>security.authentication.failures</c>.</para>
+/// erro, registrado no log com o motivo (evento 3001) e na métrica <c>tec.security.authentication.failures</c>.</para>
 /// <para>Valores fora do formato (<see cref="SecurityRules.IsValidName"/>) são descartados individualmente, com log de aviso
 /// (só a quantidade, nunca o valor).</para>
 /// </remarks>
