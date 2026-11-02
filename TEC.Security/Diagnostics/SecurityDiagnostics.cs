@@ -34,7 +34,6 @@ public static class SecurityDiagnostics
     /// <item><description><see cref="TecCircuitStateChangesName"/> (contador): mudanças de estado do circuit breaker, com
     /// <c>security.provider</c> e <c>security.circuit.state</c> (<c>open</c>, <c>half_open</c>, <c>closed</c>).</description></item>
     /// </list>
-    /// Cada instrumento também é emitido com o nome antigo (<c>security.*</c>, obsoleto) até a 0.1.0, com as mesmas tags e medições.
     /// </summary>
     public const string MeterName = "TEC.Security";
 
@@ -49,22 +48,6 @@ public static class SecurityDiagnostics
 
     /// <summary>Contador de mudanças de estado do circuit breaker (nome da convenção CMP-OBS-06).</summary>
     public const string TecCircuitStateChangesName = "tec.security.circuit.state_changes";
-
-    // Nomes antigos (sem o prefixo tec.security.). OBSOLETOS: coexistem com os novos por uma versão MINOR para não quebrar
-    // dashboards e alertas dos consumidores; remoção prevista na 0.1.0 (2027-03-01). Não levam [Obsolete] para não gerar
-    // aviso de compilação em quem só usa as constantes para assinar o Meter.
-
-    /// <summary>OBSOLETO (remoção na 0.1.0): use <see cref="TecAuthenticationFailuresName"/>. Emitido em paralelo até lá.</summary>
-    public const string AuthenticationFailuresName = "security.authentication.failures";
-
-    /// <summary>OBSOLETO (remoção na 0.1.0): use <see cref="TecAuthorizationDeniedName"/>. Emitido em paralelo até lá.</summary>
-    public const string AuthorizationDeniedName = "security.authorization.denied";
-
-    /// <summary>OBSOLETO (remoção na 0.1.0): use <see cref="TecTokenAcquisitionDurationName"/>. Emitido em paralelo até lá.</summary>
-    public const string TokenAcquisitionDurationName = "security.token.acquisition.duration";
-
-    /// <summary>OBSOLETO (remoção na 0.1.0): use <see cref="TecCircuitStateChangesName"/>. Emitido em paralelo até lá.</summary>
-    public const string CircuitStateChangesName = "security.circuit.state_changes";
 
     internal const string SchemeTag = "security.scheme";
     internal const string ReasonTag = "security.reason";
@@ -92,19 +75,6 @@ public static class SecurityDiagnostics
     private static readonly Counter<long> CircuitStateChanges = Meter.CreateCounter<long>(
         TecCircuitStateChangesName, unit: "{change}", description: "Mudanças de estado do circuit breaker dos provedores de identidade.");
 
-    // Instrumentos com o nome antigo (OBSOLETOS, remoção na 0.1.0). Mesma unidade, mesmas tags, mesma medição.
-    private static readonly Counter<long> LegacyAuthenticationFailures = Meter.CreateCounter<long>(
-        AuthenticationFailuresName, unit: "{failure}", description: "OBSOLETO: use tec.security.authentication.failures.");
-
-    private static readonly Counter<long> LegacyAuthorizationDenied = Meter.CreateCounter<long>(
-        AuthorizationDeniedName, unit: "{denial}", description: "OBSOLETO: use tec.security.authorization.denied.");
-
-    private static readonly Histogram<double> LegacyTokenAcquisitionDuration = Meter.CreateHistogram<double>(
-        TokenAcquisitionDurationName, unit: "s", description: "OBSOLETO: use tec.security.token.acquisition.duration.");
-
-    private static readonly Counter<long> LegacyCircuitStateChanges = Meter.CreateCounter<long>(
-        CircuitStateChangesName, unit: "{change}", description: "OBSOLETO: use tec.security.circuit.state_changes.");
-
     /// <summary>Registra uma autenticação recusada. Uso pelos pacotes de provedor.</summary>
     public static void RecordAuthenticationFailure(string scheme, string reason)
     {
@@ -112,8 +82,6 @@ public static class SecurityDiagnostics
         var reasonTag = new KeyValuePair<string, object?>(ReasonTag, reason);
         if (AuthenticationFailures.Enabled)
             AuthenticationFailures.Add(1, schemeTag, reasonTag);
-        if (LegacyAuthenticationFailures.Enabled)
-            LegacyAuthenticationFailures.Add(1, schemeTag, reasonTag);
     }
 
     /// <summary>Registra um acesso negado. Uso pelos pacotes de provedor.</summary>
@@ -123,14 +91,12 @@ public static class SecurityDiagnostics
         var reasonTag = new KeyValuePair<string, object?>(ReasonTag, reason);
         if (AuthorizationDenied.Enabled)
             AuthorizationDenied.Add(1, schemeTag, reasonTag);
-        if (LegacyAuthorizationDenied.Enabled)
-            LegacyAuthorizationDenied.Add(1, schemeTag, reasonTag);
     }
 
     /// <summary>Registra a obtenção de um token de serviço. <paramref name="errorType"/> só em falha.</summary>
     public static void RecordTokenAcquisition(string provider, bool cacheHit, double seconds, string? errorType)
     {
-        if (!TokenAcquisitionDuration.Enabled && !LegacyTokenAcquisitionDuration.Enabled)
+        if (!TokenAcquisitionDuration.Enabled)
             return;
 
         var tags = new TagList
@@ -140,10 +106,7 @@ public static class SecurityDiagnostics
         };
         if (errorType is not null)
             tags.Add(ErrorTypeTag, errorType);
-        if (TokenAcquisitionDuration.Enabled)
-            TokenAcquisitionDuration.Record(seconds, tags);
-        if (LegacyTokenAcquisitionDuration.Enabled)
-            LegacyTokenAcquisitionDuration.Record(seconds, tags);
+        TokenAcquisitionDuration.Record(seconds, tags);
     }
 
     /// <summary>Inicia a <c>Activity</c> de obtenção de token (ou <c>null</c> sem ouvinte). Uso pelos pacotes de provedor.</summary>
@@ -161,7 +124,5 @@ public static class SecurityDiagnostics
         var stateTag = new KeyValuePair<string, object?>(CircuitStateTag, state);
         if (CircuitStateChanges.Enabled)
             CircuitStateChanges.Add(1, providerTag, stateTag);
-        if (LegacyCircuitStateChanges.Enabled)
-            LegacyCircuitStateChanges.Add(1, providerTag, stateTag);
     }
 }

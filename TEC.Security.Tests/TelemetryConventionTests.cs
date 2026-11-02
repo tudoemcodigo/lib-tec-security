@@ -10,13 +10,12 @@ using TEC.Security.Resilience;
 namespace TEC.Security.Tests;
 
 /// <summary>
-/// CMP-OBS-06/07: instrumentos <c>tec.security.*</c> (com o nome antigo <c>security.*</c> coexistindo por uma MINOR, mesma medição
-/// e mesmas tags) e EventIds do componente na faixa 3000-3999.
+/// CMP-OBS-06/07: todo instrumento começa com <c>tec.security.</c> (corte limpo, ADR 0009 da Doutrina: os nomes <c>security.*</c>
+/// não existem mais) e os EventIds do componente ficam na faixa 3000-3999.
 /// </summary>
 public class TelemetryConventionTests
 {
-    private const string NewPrefix = "tec.security.";
-    private const string LegacyPrefix = "security.";
+    private const string Prefix = "tec.security.";
 
     private sealed record Measurement(string Instrument, double Value, Dictionary<string, object?> Tags);
 
@@ -70,68 +69,61 @@ public class TelemetryConventionTests
 
     private static string Marker() => "t" + Guid.NewGuid().ToString("N");
 
-    private static async Task AssertSameMeasurementAsync(Capture capture, string newName, string legacyName, double expectedValue,
+    private static async Task<Measurement> AssertSingleMeasurementAsync(Capture capture, string name, double expectedValue,
         params string[] expectedTagKeys)
     {
-        var current = capture.Of(newName);
-        var legacy = capture.Of(legacyName);
-        await Assert.That(current.Length).IsEqualTo(1);
-        await Assert.That(legacy.Length).IsEqualTo(1);
-        await Assert.That(current[0].Value).IsEqualTo(expectedValue);
-        await Assert.That(legacy[0].Value).IsEqualTo(expectedValue);
-        // As tags não mudam: mesmas chaves (os nomes security.* atuais) e mesmos valores nos dois instrumentos
-        await Assert.That(current[0].Tags.Keys.Order().ToArray()).IsEquivalentTo(expectedTagKeys.Order().ToArray());
-        await Assert.That(legacy[0].Tags.Keys.Order().ToArray()).IsEquivalentTo(expectedTagKeys.Order().ToArray());
-        foreach (var key in expectedTagKeys)
-            await Assert.That(legacy[0].Tags[key]).IsEqualTo(current[0].Tags[key]);
+        var measurements = capture.Of(name);
+        await Assert.That(measurements.Length).IsEqualTo(1);
+        await Assert.That(measurements[0].Value).IsEqualTo(expectedValue);
+        // As tags não mudam: só as chaves esperadas, sem excesso
+        await Assert.That(measurements[0].Tags.Keys.Order().ToArray()).IsEquivalentTo(expectedTagKeys.Order().ToArray());
+        return measurements[0];
     }
 
-    // ================================================================ Coexistência novo + antigo
+    // ================================================================ Valor e tags dos instrumentos tec.security.*
 
     [Test]
-    public async Task Authentication_failure_is_emitted_by_new_and_legacy_instruments_with_same_tags()
+    public async Task Authentication_failure_is_counted_with_scheme_and_reason()
     {
         string marker = Marker();
         using var capture = new Capture(marker);
 
         SecurityDiagnostics.RecordAuthenticationFailure(marker, "token");
 
-        await AssertSameMeasurementAsync(capture, "tec.security.authentication.failures", "security.authentication.failures", 1,
-            "security.scheme", "security.reason");
-        await Assert.That(capture.Of("tec.security.authentication.failures")[0].Tags["security.scheme"]).IsEqualTo(marker);
-        await Assert.That(capture.Of("tec.security.authentication.failures")[0].Tags["security.reason"]).IsEqualTo("token");
+        var m = await AssertSingleMeasurementAsync(capture, "tec.security.authentication.failures", 1, "security.scheme", "security.reason");
+        await Assert.That(m.Tags["security.scheme"]).IsEqualTo(marker);
+        await Assert.That(m.Tags["security.reason"]).IsEqualTo("token");
     }
 
     [Test]
-    public async Task Authorization_denied_is_emitted_by_new_and_legacy_instruments_with_same_tags()
+    public async Task Authorization_denied_is_counted_with_scheme_and_reason()
     {
         string marker = Marker();
         using var capture = new Capture(marker);
 
         SecurityDiagnostics.RecordAuthorizationDenied(marker, "permission");
 
-        await AssertSameMeasurementAsync(capture, "tec.security.authorization.denied", "security.authorization.denied", 1,
-            "security.scheme", "security.reason");
+        var m = await AssertSingleMeasurementAsync(capture, "tec.security.authorization.denied", 1, "security.scheme", "security.reason");
+        await Assert.That(m.Tags["security.reason"]).IsEqualTo("permission");
     }
 
     [Test]
-    public async Task Authorization_denied_without_scheme_uses_none_in_both_instruments()
+    public async Task Authorization_denied_without_scheme_uses_none()
     {
-        // Sem esquema o marcador vai no motivo; o valor do esquema ("none") tem de ser igual nos dois instrumentos
+        // Sem esquema o marcador vai no motivo; o valor do esquema tem de ser "none"
         string marker = Marker();
         using var capture = new Capture(marker);
 
         SecurityDiagnostics.RecordAuthorizationDenied(null, marker);
 
-        await AssertSameMeasurementAsync(capture, "tec.security.authorization.denied", "security.authorization.denied", 1,
-            "security.scheme", "security.reason");
-        await Assert.That(capture.Of("security.authorization.denied")[0].Tags["security.scheme"]).IsEqualTo("none");
+        var m = await AssertSingleMeasurementAsync(capture, "tec.security.authorization.denied", 1, "security.scheme", "security.reason");
+        await Assert.That(m.Tags["security.scheme"]).IsEqualTo("none");
     }
 
     [Test]
     [Arguments(true, null)]
     [Arguments(false, "HttpRequestException")]
-    public async Task Token_acquisition_duration_is_recorded_by_new_and_legacy_histograms_with_same_tags(bool cacheHit, string? errorType)
+    public async Task Token_acquisition_duration_is_recorded_with_provider_cache_and_error_type(bool cacheHit, string? errorType)
     {
         string marker = Marker();
         using var capture = new Capture(marker);
@@ -141,12 +133,12 @@ public class TelemetryConventionTests
         string[] keys = errorType is null
             ? ["security.provider", "security.cache"]
             : ["security.provider", "security.cache", "error.type"];
-        await AssertSameMeasurementAsync(capture, "tec.security.token.acquisition.duration", "security.token.acquisition.duration", 0.25, keys);
-        await Assert.That(capture.Of("security.token.acquisition.duration")[0].Tags["security.cache"]).IsEqualTo(cacheHit ? "hit" : "miss");
+        var m = await AssertSingleMeasurementAsync(capture, "tec.security.token.acquisition.duration", 0.25, keys);
+        await Assert.That(m.Tags["security.cache"]).IsEqualTo(cacheHit ? "hit" : "miss");
     }
 
     [Test]
-    public async Task Circuit_state_changes_are_emitted_by_new_and_legacy_instruments_with_same_tags()
+    public async Task Circuit_state_changes_are_counted_with_provider_and_state()
     {
         string marker = Marker();
         using var capture = new Capture(marker);
@@ -162,13 +154,12 @@ public class TelemetryConventionTests
                 .Throws<HttpRequestException>();
 
         await Assert.That(circuit.IsOpen).IsTrue();
-        await AssertSameMeasurementAsync(capture, "tec.security.circuit.state_changes", "security.circuit.state_changes", 1,
-            "security.provider", "security.circuit.state");
-        await Assert.That(capture.Of("tec.security.circuit.state_changes")[0].Tags["security.circuit.state"]).IsEqualTo("open");
+        var m = await AssertSingleMeasurementAsync(capture, "tec.security.circuit.state_changes", 1, "security.provider", "security.circuit.state");
+        await Assert.That(m.Tags["security.circuit.state"]).IsEqualTo("open");
     }
 
     [Test]
-    public async Task Repeated_failures_count_the_same_in_both_instruments()
+    public async Task Repeated_failures_accumulate_in_the_single_instrument()
     {
         string marker = Marker();
         using var capture = new Capture(marker);
@@ -177,7 +168,6 @@ public class TelemetryConventionTests
             SecurityDiagnostics.RecordAuthenticationFailure(marker, "api_key");
 
         await Assert.That(capture.Of("tec.security.authentication.failures").Sum(m => m.Value)).IsEqualTo(7);
-        await Assert.That(capture.Of("security.authentication.failures").Sum(m => m.Value)).IsEqualTo(7);
     }
 
     // ================================================================ Convenção CMP-OBS-06
@@ -190,41 +180,56 @@ public class TelemetryConventionTests
     }
 
     [Test]
-    public async Task Every_instrument_starts_with_tec_security_or_is_a_listed_legacy_name()
+    public async Task Every_instrument_starts_with_tec_security_without_exception()
     {
         using var capture = new Capture(Marker());
 
         string[] published = capture.Instruments.ToArray();
-        string[] current = published.Where(n => n.StartsWith(NewPrefix, StringComparison.Ordinal)).ToArray();
-        string[] legacy = published.Except(current).ToArray();
 
-        await Assert.That(current.Length).IsEqualTo(4);
-        // O que não segue a convenção só pode ser o nome antigo de um instrumento novo (coexistência, remoção na 0.1.0)
-        await Assert.That(legacy.Length).IsEqualTo(4);
-        foreach (string name in legacy)
+        await Assert.That(published.Length).IsEqualTo(4);
+        foreach (string name in published)
         {
-            await Assert.That(name.StartsWith(LegacyPrefix, StringComparison.Ordinal)).IsTrue();
-            await Assert.That(current).Contains("tec." + name);
-        }
-        foreach (string name in current)
+            await Assert.That(name.StartsWith(Prefix, StringComparison.Ordinal)).IsTrue();
             await Assert.That(name).IsEqualTo(name.ToLowerInvariant());
+        }
     }
 
     [Test]
-    public async Task Public_name_constants_follow_the_convention_and_pair_with_the_legacy_ones()
+    public async Task Legacy_instrument_names_no_longer_exist()
+    {
+        // ADR 0009 da Doutrina: corte limpo, sem coexistência
+        string[] legacy =
+        [
+            "security.authentication.failures",
+            "security.authorization.denied",
+            "security.token.acquisition.duration",
+            "security.circuit.state_changes"
+        ];
+        string marker = Marker();
+        using var capture = new Capture(marker);
+
+        SecurityDiagnostics.RecordAuthenticationFailure(marker, "token");
+        SecurityDiagnostics.RecordAuthorizationDenied(marker, "permission");
+        SecurityDiagnostics.RecordTokenAcquisition(marker, false, 0.1, null);
+
+        await Assert.That(capture.Instruments.Intersect(legacy).ToArray()).IsEmpty();
+        foreach (string name in legacy)
+            await Assert.That(capture.Of(name)).IsEmpty();
+    }
+
+    [Test]
+    public async Task Public_name_constants_all_follow_the_convention()
     {
         var constants = typeof(SecurityDiagnostics).GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(f => f.IsLiteral && f.Name.EndsWith("Name", StringComparison.Ordinal)
                 && f.Name is not (nameof(SecurityDiagnostics.MeterName) or nameof(SecurityDiagnostics.ActivitySourceName)))
             .ToDictionary(f => f.Name, f => (string)f.GetRawConstantValue()!);
 
-        var tec = constants.Where(c => c.Key.StartsWith("Tec", StringComparison.Ordinal)).ToArray();
-        await Assert.That(tec.Length).IsEqualTo(4);
-        foreach (var (name, value) in tec)
+        await Assert.That(constants.Count).IsEqualTo(4);
+        foreach (var (name, value) in constants)
         {
-            await Assert.That(value.StartsWith(NewPrefix, StringComparison.Ordinal)).IsTrue();
-            // Cada constante nova tem o par antigo (mesmo nome sem "Tec", valor sem o prefixo "tec.")
-            await Assert.That(constants[name["Tec".Length..]]).IsEqualTo(value["tec.".Length..]);
+            await Assert.That(name.StartsWith("Tec", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(value.StartsWith(Prefix, StringComparison.Ordinal)).IsTrue();
         }
     }
 

@@ -224,12 +224,12 @@ flowchart LR
 | [🤖 Workers](docs/workers.md) | Identidade de sistema, `RunAs`, filas e TEC.Cqrs fora do HTTP |
 | [🧱 Novo provedor](docs/novo-provedor.md) | Como plugar outro IdP com as mesmas garantias |
 | [🧬 Integrações TEC](docs/integracoes-tec.md) | Core, Vault, Cqrs, ORM e Observability |
-| [📈 Observabilidade](docs/observabilidade.md) | Métricas (`tec.security.*`; nomes `security.*` obsoletos até a 0.1.0), traces, eventos de log (3000-3999) e alertas |
+| [📈 Observabilidade](docs/observabilidade.md) | Métricas (`tec.security.*`), traces, eventos de log (3000-3999) e alertas |
 | [❌ Erros](docs/erros.md) | Códigos de `SecurityErrors`, respostas e exceções |
 | [🛡️ Segurança](docs/seguranca.md) | Modelo de ameaças, controles com os testes, limites, riscos residuais e checklist |
 | [🧪 Testes](docs/testes.md) | Testar a sua API; categorias, carga, benchmarks, variáveis `TEC_CARGA_*` |
 | [💻 Desenvolvimento local](docs/desenvolvimento.md) | Como compilar (feed `tec-interno` por padrão, repositórios vizinhos sob demanda) e regenerar lock files |
-| [🔍 Revisão técnica](docs/revisao-tecnica.md) | Revisão histórica de segurança, código, organização e docs (2026-10-19, versão 0.1.0, quando ainda existia o pacote `TEC.Security.EntraId`): achados com `arquivo:linha`, correções e melhorias sugeridas |
+| [🔍 Revisão técnica](docs/revisao-tecnica.md) | Revisão histórica de segurança, código, organização e docs (2026-10-19, quando ainda existia o pacote `TEC.Security.EntraId`): achados com `arquivo:linha`, correções e melhorias sugeridas |
 | [🏛️ Decisões de arquitetura (ADRs)](docs/adr/README.md) | Registros das decisões: identidade normalizada, fechado por padrão, permissões, tenants, API keys, tokens de serviço, workers, provedores e tipo da identidade (`Kind`) |
 | [⚙️ CI/CD](.github/workflows/README.md) | Workflows, gatilhos, Variables e como publicar |
 

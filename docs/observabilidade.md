@@ -68,20 +68,6 @@ dimensões (tags) continuam com os nomes `security.*` e `error.type`.
 | `tec.security.token.acquisition.duration` | Histograma | `s` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.cache` (`hit`/`miss`), `error.type` (só em falha: nome do tipo da exceção) |
 | `tec.security.circuit.state_changes` | Contador | `{change}` | `security.provider` (`OpenIdConnect.M2M`, o nome do seu provedor), `security.circuit.state` (`open`, `half_open`, `closed`) |
 
-#### Migração dos nomes antigos (obsoletos)
-
-Até a 0.1.0 (remoção prevista para 2027-03-01) o componente emite **também** os nomes antigos, com a mesma medição, a mesma
-unidade e as mesmas dimensões. Eles estão **obsoletos**: migre dashboards e alertas para os nomes novos antes da remoção. Quem
-usa o Prometheus deve trocar, por exemplo, `security_authentication_failures_total` por `tec_security_authentication_failures_total`.
-Durante a coexistência, uma consulta que soma os dois nomes conta cada evento em dobro.
-
-| Nome antigo (obsoleto) | Nome novo |
-|---|---|
-| `security.authentication.failures` | `tec.security.authentication.failures` |
-| `security.authorization.denied` | `tec.security.authorization.denied` |
-| `security.token.acquisition.duration` | `tec.security.token.acquisition.duration` |
-| `security.circuit.state_changes` | `tec.security.circuit.state_changes` |
-
 | `security.reason` (autenticação) | Origem |
 |---|---|
 | `token` | Token inválido (JwtBearer) ou credencial não reconhecida (`TEC.None`) |
@@ -153,10 +139,6 @@ A validação de tokens de entrada não gera span próprio: o tempo aparece no s
 | `TecAuthorizationDeniedName` | `"tec.security.authorization.denied"` |
 | `TecTokenAcquisitionDurationName` | `"tec.security.token.acquisition.duration"` |
 | `TecCircuitStateChangesName` | `"tec.security.circuit.state_changes"` |
-| `AuthenticationFailuresName` (obsoleto) | `"security.authentication.failures"`, remoção na 0.1.0 |
-| `AuthorizationDeniedName` (obsoleto) | `"security.authorization.denied"`, remoção na 0.1.0 |
-| `TokenAcquisitionDurationName` (obsoleto) | `"security.token.acquisition.duration"`, remoção na 0.1.0 |
-| `CircuitStateChangesName` (obsoleto) | `"security.circuit.state_changes"`, remoção na 0.1.0 |
 | `RecordAuthenticationFailure(scheme, reason)` | Para pacotes de provedor |
 | `RecordAuthorizationDenied(scheme, reason)` | Para pacotes de provedor |
 | `RecordTokenAcquisition(provider, cacheHit, seconds, errorType)` | Para provedores de token próprios |

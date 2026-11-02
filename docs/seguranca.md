@@ -220,7 +220,7 @@ O TEC.Security **não** limita a taxa de requisições. Use o `RateLimiter` do A
 - [ ] Data Protection persistido e protegido (login web com várias instâncias).
 - [ ] HTTPS obrigatório, HSTS e `UseForwardedHeaders` atrás de proxy.
 - [ ] Rate limiting nos endpoints públicos, de login e de API key.
-- [ ] Alertas nos eventos 3110, 3203, 3003, 3101, 3120 e na métrica `tec.security.authentication.failures` (o nome antigo `security.authentication.failures` segue emitido até a 0.1.0).
+- [ ] Alertas nos eventos 3110, 3203, 3003, 3101, 3120 e na métrica `tec.security.authentication.failures`.
 - [ ] Logs de acesso sem `Authorization`, `X-Api-Key` e `access_token`.
 - [ ] `RolesAsPermissions: false` e permissões por tenant em APIs multi-tenant (sem aviso 3403).
 - [ ] Nenhum `AddTestJwt` alcançável fora de Development, Testing e Test.
