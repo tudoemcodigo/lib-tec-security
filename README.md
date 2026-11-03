@@ -28,6 +28,7 @@ OpenID Connect agnóstico (Keycloak, Auth0, Okta, Microsoft Entra ID, Google, Co
 - [📥 Instalação](#-instalação)
 - [🚀 Início rápido](#-início-rápido)
 - [🧭 O que tem dentro](#-o-que-tem-dentro)
+- [🧩 Diagrama de arquitetura](#-diagrama-de-arquitetura)
 - [📚 Documentação](#-documentação)
 - [⚡ Compatibilidade](#-compatibilidade)
 - [🛡️ Segurança](#️-segurança)
@@ -208,6 +209,98 @@ flowchart LR
 | 🤖 Workers | `ISecurityContext.CreateSystemPrincipalAsync`, `RunAs` |
 | 🧱 Extensão | `AddJwtBearerProvider`, `AddWebLoginProvider`, `JwtHardening` |
 | 🧪 Testes | `TestTokenIssuer`, `AddTestJwt` |
+
+## 🧩 Diagrama de arquitetura
+
+Componentes e ligações do `TEC.Security`, gerados pelo [GitDiagram](https://gitdiagram.com/tudoemcodigo/lib-tec-security) a partir da `main` em 02/11/2026. O diagrama é gerado por IA a partir de uma amostra do código: use-o como mapa de leitura, não como contrato.
+
+```mermaid
+flowchart TD
+
+subgraph group_core["Core identity"]
+  node_keyvalidator["API key validation<br/>[ApiKeyValidator.cs]"]
+  node_external["External identity"]
+  node_identityfactory["Identity normalization"]
+  node_tenantregistry[("Tenant registry")]
+  node_permissionstore[("Permission store")]
+  node_securityuser["Normalized user<br/>[SecurityUser.cs]"]
+end
+
+subgraph group_http["HTTP security"]
+  node_selector["Scheme selection"]
+  node_jwt["JWT authentication"]
+  node_apikeyauth["API key authentication"]
+  node_authorization["Permission authorization"]
+  node_authresult["401/403 response"]
+  node_websetup["Web login setup"]
+  node_loginendpoints["Login endpoints"]
+end
+
+subgraph group_oidc["OIDC provider"]
+  node_oidcsetup["OIDC registration"]
+  node_oidcidentity["OIDC identity mapping"]
+  node_tokenprovider["Client credentials"]
+end
+
+subgraph group_outbound["Service tokens"]
+  node_tokenhandler["Outbound token handler"]
+end
+
+subgraph group_ops["Context and telemetry"]
+  node_context["Security context<br/>[SecurityContext.cs]"]
+  node_diagnostics["Security diagnostics"]
+end
+
+node_caller(("API client"))
+node_aspnet(("ASP.NET request"))
+node_idp(("Identity provider"))
+node_vault[("TEC.Vault")]
+node_endpoint["Secured endpoint"]
+node_worker(("Worker or service"))
+
+node_caller -->|"sends request"| node_aspnet
+node_aspnet -.->|"selects scheme"| node_selector
+node_selector -.->|"dispatches JWT"| node_jwt
+node_selector -.->|"dispatches API key"| node_apikeyauth
+node_apikeyauth -->|"validates key"| node_keyvalidator
+node_keyvalidator -->|"creates identity"| node_external
+node_jwt -.->|"maps claims"| node_oidcidentity
+node_oidcidentity -->|"creates identity"| node_external
+node_external -->|"normalizes"| node_identityfactory
+node_identityfactory -->|"resolves tenant"| node_tenantregistry
+node_identityfactory -->|"loads permissions"| node_permissionstore
+node_identityfactory -->|"produces claims"| node_securityuser
+node_securityuser -.->|"checks permissions"| node_authorization
+node_authorization -.->|"allows access"| node_endpoint
+node_authorization -->|"handles denial"| node_authresult
+node_authresult -->|"writes response"| node_aspnet
+node_websetup -.->|"configures login"| node_loginendpoints
+node_loginendpoints -.->|"starts OIDC login"| node_idp
+node_oidcsetup -->|"registers mapping"| node_oidcidentity
+node_oidcsetup -.->|"registers web login"| node_websetup
+node_worker -.->|"sends service request"| node_tokenhandler
+node_tokenhandler -->|"requests token"| node_tokenprovider
+node_tokenprovider -.->|"reads secret"| node_vault
+node_tokenprovider -.->|"requests token"| node_idp
+node_worker -.->|"runs as identity"| node_context
+node_identityfactory -->|"backs context"| node_context
+node_identityfactory -.->|"records events"| node_diagnostics
+node_authorization -.->|"records denials"| node_diagnostics
+
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_keyvalidator,node_external,node_identityfactory,node_tenantregistry,node_permissionstore,node_securityuser,node_caller toneBlue
+class node_selector,node_jwt,node_apikeyauth,node_authorization,node_authresult,node_websetup,node_loginendpoints,node_vault toneAmber
+class node_oidcsetup,node_oidcidentity,node_tokenprovider,node_aspnet toneMint
+class node_tokenhandler,node_worker toneRose
+class node_context,node_diagnostics,node_idp,node_endpoint toneIndigo
+```
 
 ## 📚 Documentação
 
