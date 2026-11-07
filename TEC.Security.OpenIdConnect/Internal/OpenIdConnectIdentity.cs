@@ -43,6 +43,7 @@ internal static class OpenIdConnectIdentity
         string? displayName = null;
         string? issuer = null;
         string? externalTenant = null;
+        var clients = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -62,6 +63,9 @@ internal static class OpenIdConnectIdentity
                 subject ??= claim.Value;
                 continue;
             }
+
+            if (Array.IndexOf(KindClassifier.ClientClaims, claim.Type) >= 0)
+                clients.TryAdd(claim.Type, claim.Value);
 
             if (claim.Type == options.NameClaimType || claim.Type is "preferred_username" or "name" or ClaimTypes.Name)
             {
@@ -191,9 +195,29 @@ internal static class OpenIdConnectIdentity
             TenantId = resolvedTenant,
             MultiTenant = options.MultiTenant,
             Name = displayName ?? subject!,
+            ClientId = ResolveClientId(clients),
             Roles = [.. roles],
             Scopes = [.. scopes]
         };
+    }
+
+    /// <summary>
+    /// Client que obteve o token: o primeiro de <c>azp</c>, <c>client_id</c> (RFC 9068), <c>clientId</c>, <c>cid</c> e <c>appid</c>.
+    /// Valores divergentes entre eles deixam o client vazio (falha fechada): quem decide pelo client não recebe um palpite.
+    /// </summary>
+    internal static string? ResolveClientId(IReadOnlyDictionary<string, string> clients)
+    {
+        string? chosen = null;
+        foreach (var type in KindClassifier.ClientClaims)
+        {
+            if (!clients.TryGetValue(type, out var value) || string.IsNullOrWhiteSpace(value))
+                continue;
+            if (chosen is not null && !string.Equals(chosen, value, StringComparison.Ordinal))
+                return null;
+            chosen ??= value;
+        }
+
+        return chosen;
     }
 
     private static void ExtractRoles(string rawValue, HashSet<string> target)
@@ -310,7 +334,8 @@ internal sealed class KindClassifier
         "preferred_username", "name", "given_name", "family_name", "middle_name", "nickname", "email", "upn", "unique_name"
     };
 
-    private static readonly string[] ClientClaims = ["azp", "client_id", "clientId", "cid", "appid"];
+    /// <summary>Claims que trazem o client que obteve o token, em ordem de preferência.</summary>
+    internal static readonly string[] ClientClaims = ["azp", "client_id", "clientId", "cid", "appid"];
 
     private readonly ClaimRule[] _application;
     private readonly ClaimRule[] _user;

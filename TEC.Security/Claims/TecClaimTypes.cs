@@ -47,7 +47,7 @@ public static class TecClaimTypes
     /// <summary>Permissão efetiva (um claim por permissão).</summary>
     public const string Permission = "tec_perm";
 
-    /// <summary>Aplicação cliente que obteve o token (ex.: <c>azp</c> do Entra ID).</summary>
+    /// <summary>Aplicação cliente que obteve o token (<c>azp</c>, ou <c>client_id</c> da RFC 9068).</summary>
     public const string ClientId = "tec_client";
 
     /// <summary>

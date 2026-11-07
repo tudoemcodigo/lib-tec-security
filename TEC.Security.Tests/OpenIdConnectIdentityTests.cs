@@ -33,6 +33,56 @@ public class OpenIdConnectIdentityTests
     private static ExternalIdentity? Identity(OpenIdConnectApiOptions options, out string reason, params (string Type, string Value)[] claims) =>
         OpenIdConnectIdentity.FromClaims("Api", [.. claims.Select(c => new Claim(c.Type, c.Value))], options, null, out reason);
 
+    // ---------------------------------------------------------------- Client que obteve o token
+
+    [Test]
+    [Arguments("azp")]
+    [Arguments("client_id")]
+    [Arguments("clientId")]
+    [Arguments("cid")]
+    [Arguments("appid")]
+    public async Task Client_claim_becomes_the_client_id(string clientClaim)
+    {
+        var identity = Identity(Api(), out _, ("sub", "svc-uuid"), ("idtyp", "app"), (clientClaim, "vendas-api"));
+
+        await Assert.That(identity!.ClientId).IsEqualTo("vendas-api");
+    }
+
+    [Test]
+    public async Task Keycloak_service_account_token_keeps_azp_as_client_id()
+    {
+        // Token de client credentials do Keycloak: sub é o id da conta de serviço, azp e client_id são o client
+        var identity = Identity(Api(), out _, ("sub", "8d3c0d4e-1111-4111-8111-111111111111"), ("azp", "vendas-api"), ("client_id", "vendas-api"),
+            ("idtyp", "app"));
+
+        await Assert.That(identity!.ClientId).IsEqualTo("vendas-api");
+        await Assert.That(identity.Kind).IsEqualTo(PrincipalKind.Application);
+    }
+
+    [Test]
+    public async Task Divergent_client_claims_leave_no_client_id()
+    {
+        var identity = Identity(Api(), out _, ("sub", "svc"), ("idtyp", "app"), ("azp", "vendas-api"), ("client_id", "outro-api"));
+
+        await Assert.That(identity!.ClientId).IsNull();
+    }
+
+    [Test]
+    public async Task Token_without_client_claim_has_no_client_id()
+    {
+        var identity = Identity(Api(), out _, ("sub", "usuario-1"), ("sid", "sessao-1"));
+
+        await Assert.That(identity!.ClientId).IsNull();
+    }
+
+    [Test]
+    public async Task Blank_client_claim_is_ignored_and_the_next_one_wins()
+    {
+        var identity = Identity(Api(), out _, ("sub", "svc"), ("idtyp", "app"), ("azp", " "), ("client_id", "vendas-api"));
+
+        await Assert.That(identity!.ClientId).IsEqualTo("vendas-api");
+    }
+
     // ---------------------------------------------------------------- Kind: sinais padrão
 
     [Test]
