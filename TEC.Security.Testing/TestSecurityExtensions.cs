@@ -75,6 +75,8 @@ public static class TestSecurityExtensions
         token.TryGetPayloadValue("idtyp", out string? idtyp);
         token.TryGetPayloadValue("tid", out string? tid);
         token.TryGetPayloadValue("name", out string? name);
+        token.TryGetPayloadValue("azp", out string? azp);
+        token.TryGetPayloadValue("client_id", out string? clientId);
 
         reason = string.Empty;
         return new ExternalIdentity
@@ -85,6 +87,8 @@ public static class TestSecurityExtensions
             Kind = idtyp == "app" ? PrincipalKind.Application : PrincipalKind.User,
             ExternalTenantId = tid,
             Name = name,
+            // Mesma regra do provedor OpenID Connect: azp, depois client_id; divergentes, nenhum
+            ClientId = azp is null ? clientId : clientId is null || clientId == azp ? azp : null,
             Roles = [.. token.Claims.Where(c => c.Type == "roles").Select(c => c.Value)],
             Scopes = string.IsNullOrWhiteSpace(scp) ? [] : scp.Split(' ', StringSplitOptions.RemoveEmptyEntries),
             SourceClaims = [.. token.Claims]

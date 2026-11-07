@@ -17,6 +17,10 @@ Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O forma
 
 - **`SecurityDiagnostics`:** as constantes públicas passam a ser `TecAuthenticationFailuresName`, `TecAuthorizationDeniedName`, `TecTokenAcquisitionDurationName` e `TecCircuitStateChangesName`. As constantes `AuthenticationFailuresName`, `AuthorizationDeniedName`, `TokenAcquisitionDurationName` e `CircuitStateChangesName` (valor `security.*`) foram **removidas**.
 
+### 🐛 Corrigido
+
+- **`ISecurityUser.ClientId` no provedor OpenID Connect:** tokens de aplicação (client credentials) chegavam com `ClientId` vazio porque o provedor normaliza as claims para `tec_*` e descarta as cruas. O provedor passa a ler o client do token em `azp`, `client_id` (RFC 9068), `clientId`, `cid` e `appid`, nessa ordem; valores divergentes entre essas claims resultam em `ClientId` nulo (fail-closed). O provedor de testes (`TEC.Security.Testing`) segue a mesma regra para `azp` e `client_id`.
+
 ### 🛠️ Manutenção
 
 - Todos os `EventId` do componente (núcleo, ASP.NET Core e OpenID Connect) estão na faixa 3000-3999 (CMP-OBS-07); nenhum mudou. Testes travam a convenção dos nomes de instrumento (todos `tec.security.*`), a inexistência dos nomes antigos e a faixa e a unicidade dos ids.
