@@ -89,7 +89,8 @@ public class OpenIdConnectWebLoginTests
         var options = services.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>().Get("Web.oidc");
         vault.Value = null;   // cofre fora do ar depois da subida
         var context = new AuthorizationCodeReceivedContext(new DefaultHttpContext { RequestServices = services }, Scheme, options,
-            new AuthenticationProperties()) { TokenEndpointRequest = new OpenIdConnectMessage() };
+            new AuthenticationProperties())
+        { TokenEndpointRequest = new OpenIdConnectMessage() };
 
         var thrown = await Assert.That(async () => await options.Events.AuthorizationCodeReceived(context)).Throws<InvalidOperationException>();
 

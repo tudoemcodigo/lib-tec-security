@@ -247,20 +247,20 @@ public class TelemetryConventionTests
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
         var found = new List<(string, int)>();
         foreach (var assembly in ComponentAssemblies)
-        foreach (var type in assembly.GetTypes())
-        {
-            foreach (var method in type.GetMethods(all))
-                if (method.GetCustomAttribute<LoggerMessageAttribute>() is { } attribute)
-                    found.Add(($"{type.FullName}.{method.Name}", attribute.EventId));
-
-            foreach (var field in type.GetFields(all))
+            foreach (var type in assembly.GetTypes())
             {
-                if (field.FieldType == typeof(EventId) && field.IsStatic)
-                    found.Add(($"{type.FullName}.{field.Name}", ((EventId)field.GetValue(null)!).Id));
-                else if (field.IsLiteral && field.Name.Contains("EventId", StringComparison.OrdinalIgnoreCase) && field.FieldType == typeof(int))
-                    found.Add(($"{type.FullName}.{field.Name}", (int)field.GetRawConstantValue()!));
+                foreach (var method in type.GetMethods(all))
+                    if (method.GetCustomAttribute<LoggerMessageAttribute>() is { } attribute)
+                        found.Add(($"{type.FullName}.{method.Name}", attribute.EventId));
+
+                foreach (var field in type.GetFields(all))
+                {
+                    if (field.FieldType == typeof(EventId) && field.IsStatic)
+                        found.Add(($"{type.FullName}.{field.Name}", ((EventId)field.GetValue(null)!).Id));
+                    else if (field.IsLiteral && field.Name.Contains("EventId", StringComparison.OrdinalIgnoreCase) && field.FieldType == typeof(int))
+                        found.Add(($"{type.FullName}.{field.Name}", (int)field.GetRawConstantValue()!));
+                }
             }
-        }
 
         return found;
     }

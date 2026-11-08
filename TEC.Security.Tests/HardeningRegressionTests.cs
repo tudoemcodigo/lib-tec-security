@@ -11,7 +11,6 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using TEC.Core.Exceptions;
 using TEC.Core.Security;
-using Base64UrlEncoder = TEC.Core.Text.Codecs.Base64UrlEncoder;
 using TEC.Security.Abstractions;
 using TEC.Security.ApiKeys;
 using TEC.Security.AspNetCore;
@@ -22,6 +21,7 @@ using TEC.Security.DependencyInjection;
 using TEC.Security.Permissions;
 using TEC.Security.Testing;
 using TEC.Security.Tokens;
+using Base64UrlEncoder = TEC.Core.Text.Codecs.Base64UrlEncoder;
 
 namespace TEC.Security.Tests;
 

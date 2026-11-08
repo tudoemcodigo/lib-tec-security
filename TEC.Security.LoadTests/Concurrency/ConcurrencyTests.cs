@@ -154,7 +154,11 @@ public class ConcurrencyTests
             string userId = $"usuario-{i % identities}";
             var result = await factory.CreateAsync(new ExternalIdentity
             {
-                Scheme = "Test", Provider = "Test", UserId = userId, Kind = PrincipalKind.Application, Roles = ["leitor"]
+                Scheme = "Test",
+                Provider = "Test",
+                UserId = userId,
+                Kind = PrincipalKind.Application,
+                Roles = ["leitor"]
             }, ct);
             if (result.IsFailure || !new SecurityUser(result.Value).HasPermission("leitor:executar"))
                 divergences.Add($"{userId}: permissões do cache incorretas");

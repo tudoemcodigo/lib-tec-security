@@ -46,7 +46,11 @@ public class EventGuardTests
     private static async Task<ClaimsPrincipal> AdminAsync(HttpContext http, string scheme = "Test", string provider = "Test") =>
         (await http.RequestServices.GetRequiredService<SecurityIdentityFactory>().CreateAsync(new ExternalIdentity
         {
-            Scheme = scheme, Provider = provider, UserId = "admin", Kind = PrincipalKind.User, Permissions = ["admin:tudo"]
+            Scheme = scheme,
+            Provider = provider,
+            UserId = "admin",
+            Kind = PrincipalKind.User,
+            Permissions = ["admin:tudo"]
         })).Value;
 
     private static HttpRequestMessage Bearer(string path, string token)
@@ -327,7 +331,10 @@ public class EventGuardTests
         var provider = services.BuildServiceProvider();
         var principal = (await provider.GetRequiredService<SecurityIdentityFactory>().CreateAsync(new ExternalIdentity
         {
-            Scheme = "Web", Provider = "Teste", UserId = "u1", Kind = PrincipalKind.User
+            Scheme = "Web",
+            Provider = "Teste",
+            UserId = "u1",
+            Kind = PrincipalKind.User
         })).Value;
         return (provider, auth, principal);
     }
@@ -393,7 +400,10 @@ public class EventGuardTests
         var http = new DefaultHttpContext { RequestServices = services };
         var application = (await services.GetRequiredService<SecurityIdentityFactory>().CreateAsync(new ExternalIdentity
         {
-            Scheme = "Web", Provider = "Teste", UserId = "servico", Kind = PrincipalKind.Application
+            Scheme = "Web",
+            Provider = "Teste",
+            UserId = "servico",
+            Kind = PrincipalKind.Application
         })).Value;
 
         await Assert.That(async () => await events.SigningIn(SigningIn(http, NormalizedIdentityTests.Forged())))
