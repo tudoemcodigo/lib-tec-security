@@ -124,7 +124,11 @@ public class VolumeTests
             {
                 var result = await factory.CreateAsync(new ExternalIdentity
                 {
-                    Scheme = "Test", Provider = "Test", UserId = $"identidade-{i:D7}", Kind = PrincipalKind.Application, Roles = ["leitor", $"grupo-{i % 50}"]
+                    Scheme = "Test",
+                    Provider = "Test",
+                    UserId = $"identidade-{i:D7}",
+                    Kind = PrincipalKind.Application,
+                    Roles = ["leitor", $"grupo-{i % 50}"]
                 }, ct);
                 if (result.IsFailure)
                     throw new InvalidOperationException("identidade recusada");
@@ -167,7 +171,11 @@ public class VolumeTests
 
         ExternalIdentity Identity(int i, string[] roles) => new()
         {
-            Scheme = "Test", Provider = "Test", UserId = $"usuario-{i}", Kind = PrincipalKind.User, Roles = roles
+            Scheme = "Test",
+            Provider = "Test",
+            UserId = $"usuario-{i}",
+            Kind = PrincipalKind.User,
+            Roles = roles
         };
 
         const int creations = 5_000;

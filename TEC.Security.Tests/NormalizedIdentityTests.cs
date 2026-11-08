@@ -57,7 +57,11 @@ public class NormalizedIdentityTests
     {
         var principal = (await Factory().CreateAsync(new ExternalIdentity
         {
-            Scheme = "Api", Provider = "Teste", UserId = "u1", Kind = PrincipalKind.User, Roles = ["Leitor"]
+            Scheme = "Api",
+            Provider = "Teste",
+            UserId = "u1",
+            Kind = PrincipalKind.User,
+            Roles = ["Leitor"]
         })).Value;
         var identity = (ClaimsIdentity)principal.Identity!;
         var role = identity.FindFirst(TecClaimTypes.Role)!;
@@ -81,7 +85,10 @@ public class NormalizedIdentityTests
     {
         var principal = (await Factory().CreateAsync(new ExternalIdentity
         {
-            Scheme = "Api", Provider = "Teste", UserId = "u1", Kind = PrincipalKind.User
+            Scheme = "Api",
+            Provider = "Teste",
+            UserId = "u1",
+            Kind = PrincipalKind.User
         })).Value;
 
         var cloned = principal.Clone();
@@ -127,7 +134,12 @@ public class NormalizedIdentityTests
         var factory = Factory();
         var login = (await factory.CreateAsync(new ExternalIdentity
         {
-            Scheme = "Web", Provider = "OpenIdConnect", UserId = "u1", Kind = PrincipalKind.User, MultiTenant = true, Roles = ["Admin"]
+            Scheme = "Web",
+            Provider = "OpenIdConnect",
+            UserId = "u1",
+            Kind = PrincipalKind.User,
+            MultiTenant = true,
+            Roles = ["Admin"]
         })).Value;
 
         var revalidated = await factory.RevalidateAsync(login);
@@ -146,7 +158,11 @@ public class NormalizedIdentityTests
         var factory = Factory();
         var login = (await factory.CreateAsync(new ExternalIdentity
         {
-            Scheme = "Web", Provider = "OpenIdConnect", UserId = "u1", Kind = PrincipalKind.User, Roles = ["Admin"],
+            Scheme = "Web",
+            Provider = "OpenIdConnect",
+            UserId = "u1",
+            Kind = PrincipalKind.User,
+            Roles = ["Admin"],
             // Claim reservado vindo do provedor: descartado, não liga o modo multi-tenant
             SourceClaims = [new Claim(TecClaimTypes.MultiTenant, TecClaimTypes.MultiTenantValue)]
         })).Value;
@@ -166,7 +182,12 @@ public class NormalizedIdentityTests
         var factory = Factory(new SecurityOptions { RolesAsPermissions = true }, loggerFactory.CreateLogger<SecurityIdentityFactory>());
         var identity = new ExternalIdentity
         {
-            Scheme = "Web", Provider = "OpenIdConnect", UserId = "u1", Kind = PrincipalKind.User, MultiTenant = true, Roles = ["Admin"]
+            Scheme = "Web",
+            Provider = "OpenIdConnect",
+            UserId = "u1",
+            Kind = PrincipalKind.User,
+            MultiTenant = true,
+            Roles = ["Admin"]
         };
 
         var first = (await factory.CreateAsync(identity)).Value;

@@ -163,7 +163,11 @@ public class DosResistanceTests
         var watch = Stopwatch.StartNew();
         var result = await factory.CreateAsync(new ExternalIdentity
         {
-            Scheme = "Test", Provider = "Test", UserId = "u", Kind = PrincipalKind.User, Roles = new LazyCollection(Roles(), 1_000_000)
+            Scheme = "Test",
+            Provider = "Test",
+            UserId = "u",
+            Kind = PrincipalKind.User,
+            Roles = new LazyCollection(Roles(), 1_000_000)
         });
 
         await Assert.That(result.IsFailure).IsTrue();

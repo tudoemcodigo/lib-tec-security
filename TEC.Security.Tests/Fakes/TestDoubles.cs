@@ -3,12 +3,12 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TEC.Vault.Abstractions;
-using TEC.Vault.Certificates;
-using TEC.Vault.Keys;
 using TEC.Core.Common.Results;
 using TEC.Security.Abstractions;
 using TEC.Security.Tokens;
+using TEC.Vault.Abstractions;
+using TEC.Vault.Certificates;
+using TEC.Vault.Keys;
 
 namespace TEC.Security.Tests.Fakes;
 

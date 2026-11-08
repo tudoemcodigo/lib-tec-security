@@ -47,9 +47,9 @@ public class ReviewRegressionTests
         // Mesmo caminho do HubDispatcher do SignalR e do AuthorizeRouteView: só IAuthorizeData
         var policy = await AuthorizationPolicy.CombineAsync(provider, [new TecAuthorizeAttribute { Permissions = "admin:excluir" }]);
         var withoutPermission = (await factory.CreateAsync(new Claims.ExternalIdentity
-            { Scheme = "Test", Provider = "Test", UserId = "u1", Kind = PrincipalKind.User })).Value;
+        { Scheme = "Test", Provider = "Test", UserId = "u1", Kind = PrincipalKind.User })).Value;
         var withPermission = (await factory.CreateAsync(new Claims.ExternalIdentity
-            { Scheme = "Test", Provider = "Test", UserId = "u2", Kind = PrincipalKind.User, Roles = ["admin:excluir"] })).Value;
+        { Scheme = "Test", Provider = "Test", UserId = "u2", Kind = PrincipalKind.User, Roles = ["admin:excluir"] })).Value;
 
         await Assert.That((await authorization.AuthorizeAsync(withoutPermission, null, policy!)).Succeeded).IsFalse();
         await Assert.That((await authorization.AuthorizeAsync(withPermission, null, policy!)).Succeeded).IsTrue();

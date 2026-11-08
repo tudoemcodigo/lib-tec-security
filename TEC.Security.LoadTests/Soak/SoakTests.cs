@@ -85,8 +85,13 @@ public class SoakTests
                         // Identidades em rotação: parte vem do cache, parte é nova (expira em 30 s)
                         var result = await factory.CreateAsync(new ExternalIdentity
                         {
-                            Scheme = "Test", Provider = "Test", UserId = $"usuario-{random.Next(20_000)}", Kind = PrincipalKind.User,
-                            ExternalTenantId = "tid-contoso", Roles = ["leitor", $"grupo-{random.Next(10)}"], Scopes = ["api.read"]
+                            Scheme = "Test",
+                            Provider = "Test",
+                            UserId = $"usuario-{random.Next(20_000)}",
+                            Kind = PrincipalKind.User,
+                            ExternalTenantId = "tid-contoso",
+                            Roles = ["leitor", $"grupo-{random.Next(10)}"],
+                            Scopes = ["api.read"]
                         });
                         ok = result.IsSuccess && new SecurityUser(result.Value).TenantId == "contoso";
                         break;

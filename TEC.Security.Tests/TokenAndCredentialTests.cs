@@ -3,12 +3,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using TEC.Vault.Abstractions;
-using TEC.Vault.Keys;
 using TEC.Security.Abstractions;
 using TEC.Security.AspNetCore;
 using TEC.Security.Tests.Fakes;
 using TEC.Security.Tokens;
+using TEC.Vault.Abstractions;
+using TEC.Vault.Keys;
 
 namespace TEC.Security.Tests;
 

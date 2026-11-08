@@ -128,7 +128,11 @@ public class IdentityFactoryTests
 
         var result = await factory.CreateAsync(new ExternalIdentity
         {
-            Scheme = "ApiKey", Provider = "ApiKey", UserId = "apikey:erp", Kind = PrincipalKind.Application, TenantId = "nao-existe"
+            Scheme = "ApiKey",
+            Provider = "ApiKey",
+            UserId = "apikey:erp",
+            Kind = PrincipalKind.Application,
+            TenantId = "nao-existe"
         });
 
         await Assert.That(result.IsFailure).IsTrue();
@@ -155,7 +159,10 @@ public class IdentityFactoryTests
 
         var result = await factory.CreateAsync(new ExternalIdentity
         {
-            Scheme = identity.Scheme, Provider = identity.Provider, UserId = userId, Kind = PrincipalKind.User
+            Scheme = identity.Scheme,
+            Provider = identity.Provider,
+            UserId = userId,
+            Kind = PrincipalKind.User
         });
 
         await Assert.That(result.IsFailure).IsTrue();
