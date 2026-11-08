@@ -4,6 +4,11 @@ Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O forma
 
 ## [Não lançado]
 
+### ✨ Adicionado
+
+- **`WebLoginSignIn.SignInWithIdTokenAsync` (TEC.Security.AspNetCore):** abre a sessão do login web a partir de um ID token que o servidor obteve direto do endpoint de token do IdP (login por senha num BFF confidencial, ADR SEC 0002 da Doutrina). Valida com o handler, as chaves, o emissor e a audiência do mesmo esquema OIDC, normaliza no `SecurityIdentityFactory` e grava o cookie com as mesmas regras; falha esperada volta como `Result`, sem detalhe ao chamador. Registrado por `AddWebLoginProvider`.
+- **`WebLoginDefinition.CreateIdentityFromClaims`:** conversão das claims de um ID token validado fora do fluxo de código; `null` desliga a entrada direta. O provedor OpenID Connect (`AddOpenIdConnectWebLogin`) a preenche com a mesma regra do fluxo de código.
+
 ### 🔄 Alterado
 
 - **Métricas renomeadas para `tec.security.*` (CMP-OBS-06), sem coexistência:** os nomes antigos foram **renomeados sem coexistência** (ADR 0009 da Doutrina: nenhum consumidor em produção). Só os nomes novos são emitidos; migre dashboards e alertas. O `Meter` e o `ActivitySource` continuam `TEC.Security` e as dimensões (`security.scheme`, `security.reason`, `security.provider`, `security.cache`, `security.circuit.state`, `error.type`) não mudam.

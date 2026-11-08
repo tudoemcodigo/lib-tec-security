@@ -20,6 +20,13 @@ public sealed class WebLoginDefinition
     /// <summary>Converte o ID token já validado em identidade, ou recusa com o motivo.</summary>
     public required CreateWebIdentityDelegate CreateIdentity { get; init; }
 
+    /// <summary>
+    /// Converte as claims de um ID token validado fora do fluxo de código (login por senha num BFF confidencial, ADR SEC 0002 da
+    /// Doutrina), com a mesma regra de <see cref="CreateIdentity"/>. <c>null</c> desliga essa entrada:
+    /// <see cref="WebLoginSignIn"/> recusa.
+    /// </summary>
+    public CreateWebIdentityFromClaimsDelegate? CreateIdentityFromClaims { get; init; }
+
     /// <summary>Configuração específica do provedor (authority, client id, emissor, credencial do cliente).</summary>
     public Action<OpenIdConnectOptions, IServiceProvider>? Configure { get; init; }
 
@@ -50,3 +57,6 @@ public sealed class WebLoginDefinition
 
 /// <summary>Converte o ID token validado (claims de <paramref name="context"/>.Principal) em identidade, ou recusa com o motivo.</summary>
 public delegate ExternalIdentity? CreateWebIdentityDelegate(TokenValidatedContext context, out string reason);
+
+/// <summary>Converte as claims de um ID token já validado em identidade, ou recusa com o motivo.</summary>
+public delegate ExternalIdentity? CreateWebIdentityFromClaimsDelegate(IReadOnlyList<System.Security.Claims.Claim> claims, IServiceProvider services, out string reason);

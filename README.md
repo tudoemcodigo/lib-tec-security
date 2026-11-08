@@ -203,7 +203,7 @@ flowchart LR
 | 👤 Identidade normalizada | `ISecurityUser`, `TecClaimTypes`, `SecurityIdentityFactory`, `ExternalIdentity` |
 | 🔐 Autorização | `[TecAuthorize]`, `RequireTecAuthorization`, `TecPrincipalKinds`, `FallbackPolicy` fechada |
 | 🏢 Tenants e permissões | `ITenantRegistry`, `ICurrentTenant`, `IPermissionStore`, `UsePermissionStore<T>()` com cache |
-| 🌐 OpenID Connect (inclui Entra ID) | `AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`, `MapTecWebLogin` |
+| 🌐 OpenID Connect (inclui Entra ID) | `AddOpenIdConnectApi`, `AddOpenIdConnectWebLogin`, `MapTecWebLogin`, `WebLoginSignIn` (sessão a partir de ID token do canal de servidor, para o login por senha do BFF) |
 | 🔁 Serviços | `AddOpenIdConnectClient`, `AddOpenIdConnectAccessToken`, `AccessTokenHandler`, `CachingAccessTokenProvider` |
 | 🔑 API keys | `ApiKeyGenerator`, `AddApiKeys`, `Security:ApiKeys` |
 | 🤖 Workers | `ISecurityContext.CreateSystemPrincipalAsync`, `RunAs` |
