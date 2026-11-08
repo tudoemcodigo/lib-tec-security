@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -196,6 +197,8 @@ public static class OpenIdConnectExtensions
                 var tenantRegistry = ctx.HttpContext.RequestServices.GetService<ITenantRegistry>();
                 return OpenIdConnectIdentity.FromWebLogin(scheme, [.. ctx.Principal!.Claims], options, tenantRegistry, out reason);
             },
+            CreateIdentityFromClaims = (IReadOnlyList<Claim> claims, IServiceProvider services, out string reason) =>
+                OpenIdConnectIdentity.FromWebLogin(scheme, claims, options, services.GetService<ITenantRegistry>(), out reason),
             Configure = (oidcOptions, sp) =>
             {
                 oidcOptions.Authority = options.Authority;

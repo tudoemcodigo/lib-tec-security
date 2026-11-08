@@ -68,6 +68,11 @@ public static class SecurityBuilderWebLoginExtensions
             .AddCookie(definition.Scheme, _ => { })
             .AddOpenIdConnect(definition.ChallengeScheme, _ => { });
 
+        // Entrada do login por senha do BFF confidencial (ADR SEC 0002): mesma definição, mesmo esquema e mesmo normalizador
+        builder.Services.AddSingleton(sp => new WebLoginSignIn(definition, sp.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>(),
+            sp.GetRequiredService<SecurityIdentityFactory>(), sp.GetService<TimeProvider>() ?? TimeProvider.System,
+            sp.GetRequiredService<ILoggerFactory>()));
+
         // Os controles obrigatórios são conferidos por SecurityOptionsValidators, depois de qualquer PostConfigure
         builder.Services.AddOptions<CookieAuthenticationOptions>(definition.Scheme)
             .Configure(o =>
