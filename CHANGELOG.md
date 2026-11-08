@@ -11,6 +11,7 @@ Todas as mudanças relevantes do **TEC.Security** são registradas aqui. O forma
 
 ### 🔄 Alterado
 
+- **Dependências:** Microsoft.AspNetCore.* e Microsoft.Extensions.* 10.0.13 → 10.0.14 (servicing), Polly.Core 8.8.0 → 8.9.1 e TUnit 1.76.0 → 1.81.10 (só testes). Testes ajustados ao `dotnet format`, sem mudança de lógica.
 - **Métricas renomeadas para `tec.security.*` (CMP-OBS-06), sem coexistência:** os nomes antigos foram **renomeados sem coexistência** (ADR 0009 da Doutrina: nenhum consumidor em produção). Só os nomes novos são emitidos; migre dashboards e alertas. O `Meter` e o `ActivitySource` continuam `TEC.Security` e as dimensões (`security.scheme`, `security.reason`, `security.provider`, `security.cache`, `security.circuit.state`, `error.type`) não mudam.
 
   | Nome antigo | Nome novo |
