@@ -36,7 +36,7 @@
     <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.19.2" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
-    <PackageVersion Include="TUnit" Version="1.81.10" />
+    <PackageVersion Include="TUnit" Version="1.81.16" />
   </ItemGroup>
 
   <!-- Pacotes do ASP.NET Core acompanham a versão do framework do alvo (net10.0 -> 10.0.x) -->
